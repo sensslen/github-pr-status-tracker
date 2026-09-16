@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PrStatusTracker.Core;
 
@@ -18,14 +18,12 @@ public static class AppPaths
 }
 
 /// <summary>Load/save one JSON document. Writes are atomic; a corrupt file is set aside, not fatal.</summary>
+/// <remarks><typeparamref name="T"/> must be registered on <see cref="AppJsonContext"/>; the type initializer fails fast otherwise.</remarks>
 public sealed class JsonFileStore<T>(string path) where T : class
 {
-    private static readonly JsonSerializerOptions s_options = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
+    private static readonly JsonTypeInfo<T> s_typeInfo =
+        AppJsonContext.Default.GetTypeInfo(typeof(T)) as JsonTypeInfo<T>
+        ?? throw new InvalidOperationException($"{typeof(T)} is not registered on {nameof(AppJsonContext)}");
 
     private readonly Lock _gate = new();
 
@@ -43,7 +41,7 @@ public sealed class JsonFileStore<T>(string path) where T : class
 
             try
             {
-                return JsonSerializer.Deserialize<T>(File.ReadAllText(path), s_options);
+                return JsonSerializer.Deserialize(File.ReadAllText(path), s_typeInfo);
             }
             catch (JsonException)
             {
@@ -69,7 +67,7 @@ public sealed class JsonFileStore<T>(string path) where T : class
                 var tmp = path + ".tmp";
                 using (var stream = File.Create(tmp))
                 {
-                    JsonSerializer.Serialize(stream, value, s_options);
+                    JsonSerializer.Serialize(stream, value, s_typeInfo);
                 }
 
                 File.Move(tmp, path, overwrite: true);

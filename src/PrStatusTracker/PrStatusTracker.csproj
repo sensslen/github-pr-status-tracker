@@ -9,7 +9,32 @@
     <ApplicationManifest Condition="Exists('app.manifest')">app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Surface trimming / AOT problems in every build, not just at publish time. -->
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
   </PropertyGroup>
+
+  <!--
+    `dotnet publish -c Release -r <rid>` produces one self-contained executable: the Avalonia native libraries
+    (Skia, HarfBuzz, ANGLE) are embedded and unpacked to the user's temp folder on first run. Add
+    -p:PublishAot=true for a NativeAOT build; that needs the platform C++ toolchain (VS "Desktop development
+    with C++" on Windows, Xcode command-line tools on macOS).
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile Condition="'$(PublishAot)' != 'true'">true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <CopyDebugSymbolFilesFromPackages>false</CopyDebugSymbolFilesFromPackages>
+  </PropertyGroup>
+
+  <!-- SkiaSharp / HarfBuzzSharp ship native .pdb files as runtime assets; they are ~100 MB of noise next to the exe. -->
+  <Target Name="StripNativeSymbolsFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
@@ -20,6 +45,10 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Markup.Declarative" Version="12.1.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmableAssembly Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
 
   <ItemGroup>

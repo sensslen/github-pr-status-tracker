@@ -82,32 +82,43 @@ dotnet test
 
 ### Publish
 
-Self-contained, single-file builds that run without a .NET install. Output lands in
-`src/PrStatusTracker/bin/Release/net10.0/<rid>/publish/`.
+A Release publish with a runtime identifier produces **one self-contained executable** —
+no .NET install needed, and the Avalonia native libraries (Skia, HarfBuzz, ANGLE) are
+embedded and unpacked to the user's temp folder on first run. The single-file settings live
+in the csproj, so the command is just:
 
 **Windows (x64)**
 
 ```bash
-dotnet publish src/PrStatusTracker -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
+dotnet publish src/PrStatusTracker -c Release -r win-x64
 ```
 
-Run `PrStatusTracker.exe` from the publish folder, or copy it anywhere. Toasts work
-out of the box (they go through Windows PowerShell's notification registration).
+Output: `src/PrStatusTracker/bin/Release/net10.0/win-x64/publish/PrStatusTracker.exe`
+(~50 MB, compressed). Copy it anywhere. Toasts work out of the box (they go through Windows
+PowerShell's notification registration).
 
 **macOS (Apple Silicon / Intel)**
 
 ```bash
-dotnet publish src/PrStatusTracker -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true
+dotnet publish src/PrStatusTracker -c Release -r osx-arm64
 ```
 
 ```bash
-dotnet publish src/PrStatusTracker -c Release -r osx-x64 --self-contained -p:PublishSingleFile=true
+dotnet publish src/PrStatusTracker -c Release -r osx-x64
 ```
 
 The result is a bare executable, which is enough to run from a terminal. For a proper
 menu-bar app (Dock-less, Finder-launchable, real notifications) it needs to be wrapped in a
 `.app` bundle with `LSUIElement` set, signed, and notarized — that is the packaging phase in
 [ARCHITECTURE.md](ARCHITECTURE.md#8-packaging) and is not scripted yet.
+
+**NativeAOT (optional)**
+
+The code is AOT-clean (JSON goes through a source-generated context; Avalonia and the
+Declarative markup support AOT), so you can add `-p:PublishAot=true` to any command above
+for a faster-starting native binary. This needs the platform C++ toolchain: on Windows the
+Visual Studio *Desktop development with C++* workload, on macOS the Xcode command-line
+tools. Without it the build fails at the link step (`vswhere.exe` not found on Windows).
 
 ## Tech stack
 

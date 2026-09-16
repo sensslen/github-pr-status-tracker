@@ -1,0 +1,76 @@
+{
+  "data": {
+    "review": {
+      "nodes": [
+        {
+          "number": 101,
+          "title": "Add retry to uploader",
+          "url": "https://github.com/acme/widgets/pull/101",
+          "isDraft": false,
+          "updatedAt": "2026-09-14T09:05:00Z",
+          "author": { "login": "alice" },
+          "repository": { "nameWithOwner": "acme/widgets" },
+          "labels": { "nodes": [ { "name": "bug" }, { "name": "backend" } ] },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "MERGEABLE",
+          "reviewRequests": { "nodes": [
+            { "requestedReviewer": { "login": "owen" } },
+            { "requestedReviewer": { "name": "platform-team" } }
+          ] },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-14T09:00:00Z", "statusCheckRollup": { "state": "PENDING" } } } ] }
+        },
+        {
+          "number": 42,
+          "title": "Review copy",
+          "url": "https://github.com/acme/widgets/pull/42",
+          "isDraft": true,
+          "updatedAt": "2026-09-10T08:00:00Z",
+          "author": { "login": "owen" },
+          "repository": { "nameWithOwner": "acme/widgets" },
+          "reviewDecision": null,
+          "mergeable": "CONFLICTING",
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] }
+        },
+        {}
+      ]
+    },
+    "authored": {
+      "nodes": [
+        {
+          "number": 7,
+          "title": "Fix flaky test",
+          "url": "https://github.com/acme/gadgets/pull/7",
+          "isDraft": false,
+          "createdAt": "2026-09-12T08:00:00Z",
+          "updatedAt": "2026-09-15T10:00:00Z",
+          "additions": 120,
+          "deletions": 34,
+          "author": { "login": "owen" },
+          "repository": { "nameWithOwner": "acme/gadgets" },
+          "reviewDecision": "APPROVED",
+          "mergeable": "MERGEABLE",
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [ { "author": { "login": "bob" }, "state": "APPROVED", "submittedAt": "2026-09-15T09:30:00Z" } ] },
+          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-15T08:00:00Z", "statusCheckRollup": { "state": "SUCCESS" } } } ] }
+        },
+        {
+          "number": 42,
+          "title": "Authored copy",
+          "url": "https://github.com/acme/widgets/pull/42",
+          "isDraft": true,
+          "updatedAt": "2026-09-10T08:00:00Z",
+          "author": { "login": "owen" },
+          "repository": { "nameWithOwner": "acme/widgets" },
+          "reviewDecision": null,
+          "mergeable": "CONFLICTING",
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] }
+        }
+      ]
+    }
+  }
+}

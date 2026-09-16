@@ -98,6 +98,7 @@ public sealed class CompactWindow : Window
         Row(
             new DockPanel().Children(
                 CheckBadge(item.Checks).DockPanel_Dock(Dock.Left).Margin(0, 0, 8, 0),
+                ConflictMarker(item).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
                 AgeLabel(item).DockPanel_Dock(Dock.Right).Margin(8, 0, 0, 0),
                 new TextBlock().Text(item.Title).FontSize(12).VerticalAlignment(VerticalAlignment.Center)
                     .TextTrimming(TextTrimming.CharacterEllipsis)),

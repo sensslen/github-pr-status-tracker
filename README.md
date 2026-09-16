@@ -95,7 +95,8 @@ dotnet publish src/PrStatusTracker -c Release -r win-x64
 
 Output: `src/PrStatusTracker/bin/Release/net10.0/win-x64/publish/PrStatusTracker.exe`
 (~50 MB, compressed). Copy it anywhere. Toasts work out of the box (they go through Windows
-PowerShell's notification registration).
+PowerShell's notification API). Until there is an installer to create the Start Menu shortcut,
+Windows has no display name for the app and labels them `PrStatusTracker`.
 
 **macOS (Apple Silicon / Intel)**
 

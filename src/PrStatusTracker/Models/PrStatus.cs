@@ -20,6 +20,7 @@ public enum PrStatus
     ChecksFailing,
     ChangesRequested,
     ReadyToMerge,
+    ReadyToMergeConflict,        // approved and green, but the branch no longer merges cleanly
     ApprovedChecksPending,
     AwaitingReview,
     NoReviewers,
@@ -38,7 +39,7 @@ public static class PrStatusExtensions
         PrStatus.AwaitingYourReview or PrStatus.RequestedViaTeam or PrStatus.AwaitingYourRereview
             or PrStatus.NewCommitsSinceYourReview or PrStatus.MergeConflict or PrStatus.ChecksFailing
             or PrStatus.ChangesRequested or PrStatus.NoReviewers => PrBucket.NeedsYou,
-        PrStatus.ReadyToMerge => PrBucket.ReadyToMerge,
+        PrStatus.ReadyToMerge or PrStatus.ReadyToMergeConflict => PrBucket.ReadyToMerge,
         _ => PrBucket.WaitingOnOthers,
     };
 
@@ -57,6 +58,7 @@ public static class PrStatusExtensions
         PrStatus.ChecksFailing => "Checks failing",
         PrStatus.ChangesRequested => "Changes requested",
         PrStatus.ReadyToMerge => "Ready to merge",
+        PrStatus.ReadyToMergeConflict => "Approved, merge conflict",
         PrStatus.ApprovedChecksPending => "Approved, checks pending",
         PrStatus.AwaitingReview => "Awaiting review",
         PrStatus.NoReviewers => "No reviewers",

@@ -43,7 +43,7 @@ internal static class PrListView
             new Grid { ColumnDefinitions = ColumnDefinitions.Parse("Auto,Auto,*,Auto"), RowDefinitions = RowDefinitions.Parse("Auto,Auto") }
                 .Children(
                     CheckBadge(item.Checks).Grid_Row(0).Grid_Column(0).Margin(0, 0, 8, 0),
-                    Pill(item.StatusLabel, BucketBrush(item.Status.Bucket())).Grid_Row(0).Grid_Column(1).Margin(0, 0, 8, 0),
+                    Pill(item.StatusLabel, PillBrush(item.Status)).Grid_Row(0).Grid_Column(1).Margin(0, 0, 8, 0),
                     RowTitle(item.Title).Grid_Row(0).Grid_Column(2),
                     AgeLabel(item).Grid_Row(0).Grid_Column(3).Margin(8, 0, 0, 0),
                     Meta(item.Details).Grid_Row(1).Grid_Column(2).Grid_ColumnSpan(2).Margin(0, 1, 0, 0)),

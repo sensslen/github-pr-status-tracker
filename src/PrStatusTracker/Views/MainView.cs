@@ -65,6 +65,27 @@ internal static class ViewHelpers
         _ => NeutralBrush,
     };
 
+    /// <summary>
+    /// Colour for a row's status pill: its bucket's colour, except where a status has to stand out from the rest
+    /// of its bucket — a conflict sits among the ready PRs but is the one you cannot merge, so it must not read as
+    /// green. Bucket chrome (the popup's segmented control) uses <see cref="BucketBrush"/> instead.
+    /// </summary>
+    public static IBrush PillBrush(PrStatus status) =>
+        status == PrStatus.ReadyToMergeConflict ? NeedsYouBrush : BucketBrush(status.Bucket());
+
+    /// <summary>
+    /// Flags a conflict on rows too narrow for a status pill. Always built, and collapsed out of the layout when
+    /// there is nothing to flag, so the row stays a single declarative expression like every other row here.
+    /// </summary>
+    public static TextBlock ConflictMarker(PrItemViewModel item)
+    {
+        var glyph = new TextBlock().Text("⚠").FontSize(11).FontWeight(FontWeight.SemiBold).Foreground(NeedsYouBrush)
+            .VerticalAlignment(VerticalAlignment.Center)
+            .IsVisible(item.HasConflict);
+        ToolTip.SetTip(glyph, "Merge conflict");
+        return glyph;
+    }
+
     public static Border Pill(string text, IBrush background) =>
         new Border()
             .Background(background)

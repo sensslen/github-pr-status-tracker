@@ -57,9 +57,19 @@ public static class StatusEvaluator
             return PrStatus.Draft;
         }
 
+        // A repo with no checks configured is green; only a rollup that exists and is not passing holds a PR back.
+        var green = pr.Checks is null or CheckState.Success;
+
+        // Everything a PR needs to be mergeable, short of actually merging cleanly. One expression so the
+        // conflicted and unconflicted variants below cannot drift apart.
+        var ready = pr.ReviewDecision == ReviewDecision.Approved && green;
+
         if (pr.Mergeable == Mergeable.Conflicting)
         {
-            return PrStatus.MergeConflict;
+            // Signed off and green, and the conflict is all that stands between it and the merge button: that
+            // belongs with the other finished PRs, where you will look when you go to merge, rather than buried
+            // among work that still needs reviewing.
+            return ready ? PrStatus.ReadyToMergeConflict : PrStatus.MergeConflict;
         }
 
         if (pr.Checks == CheckState.Failure)
@@ -74,7 +84,7 @@ public static class StatusEvaluator
 
         if (pr.ReviewDecision == ReviewDecision.Approved)
         {
-            return pr.Checks == CheckState.Pending ? PrStatus.ApprovedChecksPending : PrStatus.ReadyToMerge;
+            return ready ? PrStatus.ReadyToMerge : PrStatus.ApprovedChecksPending;
         }
 
         var othersInvolved = pr.RequestedReviewers.Count > 0

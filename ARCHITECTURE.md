@@ -180,6 +180,7 @@ each status belongs to a bucket that drives grouping and colour in the UI.
 | Condition (first match wins) | Status | Bucket |
 |---|---|---|
 | Draft | `Draft` | Waiting on others |
+| `mergeable == CONFLICTING`, approved and checks green | `ReadyToMergeConflict` | **Ready to merge** |
 | `mergeable == CONFLICTING` | `MergeConflict` | **Needs you** |
 | Checks rollup is `FAILURE` or `ERROR` | `ChecksFailing` | **Needs you** |
 | `reviewDecision == CHANGES_REQUESTED` | `ChangesRequested` | **Needs you** |
@@ -190,6 +191,23 @@ each status belongs to a bucket that drives grouping and colour in the UI.
 
 A PR that appears in both lists (you authored it *and* were asked to review it) is shown
 once, under the authored rules.
+
+A conflict normally means the PR is back on you, so `MergeConflict` sits in **Needs you**.
+The exception is a PR that is signed off and green, where the conflict is the only thing
+left between it and the merge button: `ReadyToMergeConflict` keeps it in **Ready to merge**,
+beside the PRs it will be merged alongside, rather than burying it among work that still
+needs reviewing. Because it is the one row in that tab you cannot actually merge, its pill
+reads *Approved, merge conflict* and is coloured **Needs you** orange instead of ready
+green, and the compact popup — which has no room for a pill — marks the row with a ⚠.
+Approved but still waiting on checks stays `MergeConflict`: it is not ready either way.
+
+Two consequences of putting this in the status rather than in a display flag, both intended.
+It counts towards *ready to merge* in the summary line and the tray — it is one rebase from
+mergeable, not a different kind of work — so the summary spells the blocked ones out rather
+than hiding them: `0 need you · 0 waiting · 1 ready to merge (1 conflicted)`. The tray tooltip
+is that same string, which is what stops the tray's ready icon from promising a merge that
+cannot happen. And because toasts are gated per bucket, a PR that develops a conflict while
+signed off toasts under the *Ready to merge* preference rather than *Needs you*.
 
 `NewCommitsSinceYourReview` compares your latest review's `submittedAt` against the head
 commit's `committedDate` (GitHub no longer populates `pushedDate`). That comparison is what moves a PR back into **Needs you** when new
@@ -232,10 +250,14 @@ Rules that keep the noise down:
 `INotifier.ShowAsync(Toast)` has one implementation per OS:
 
 - **Windows** — the WinRT toast API, driven through a short Windows PowerShell script
-  (`-EncodedCommand`). This avoids a Windows-only TFM and works with no installer: the toast
-  is shown under PowerShell's own AUMID and uses protocol activation, so clicking it opens
-  the PR URL. The packaging phase can swap this for `CommunityToolkit.WinUI.Notifications`
-  with the app's own AUMID once there is an installer to register it.
+  (`-EncodedCommand`). This avoids a Windows-only TFM, works with no installer, and uses
+  protocol activation, so clicking it opens the PR URL. The toast is shown under the app's own
+  AUMID (`PrStatusTracker`). Windows takes the name it puts on a toast from the Start Menu
+  shortcut carrying that AUMID; with no shortcut yet it renders the AUMID itself, so toasts
+  read `PrStatusTracker` rather than `Windows PowerShell` as they did when this borrowed
+  PowerShell's AUMID. The shortcut the installer creates (section 8) is what turns that into a
+  spaced display name and the app's icon — no code change needed. The packaging phase can also
+  swap the script for `CommunityToolkit.WinUI.Notifications`.
 - **macOS** — `osascript -e "display notification ..."`. This is the unsigned-build
   fallback; `UNUserNotificationCenter` (with click-through to the PR) needs a signed `.app`
   bundle and is deferred to packaging.
@@ -278,7 +300,7 @@ movable, pinned to the tray corner (bottom-right on Windows, top-right on macOS)
 when it loses focus. A **segmented control** at the top switches between the three buckets
 (`Needs you (13) · Waiting (5) · Ready (2)`; a segmented control rather than a dropdown so
 the counts are visible and switching is one click), with the selected bucket's rows below
-as single-line `[CI badge] title … age` entries, and *Open main window* / *Refresh* at the
+as single-line `[CI badge] [⚠ if conflicted] title … age` entries, and *Open main window* / *Refresh* at the
 bottom. The popup is never filtered — it shows the same unfiltered set the tray counts.
 
 **Main window** — one window, a filter bar, and one tab per bucket plus two more.
@@ -299,7 +321,8 @@ Tabs:
    Every PR list is sorted **oldest PR first** (by `createdAt`), regardless of status.
    Rows are two dense lines and the whole row is a button that opens the PR:
    `[CI badge] [status pill] Title … age` (the age turns bold, orange and gets an ⏳ once the
-   PR has been open for more than 24 hours) over
+   PR has been open for more than 24 hours; the status pill takes its bucket's colour, except
+   for `ReadyToMergeConflict`, which is orange so it stands out among the ready PRs) over
    `repo#number · author · +adds −dels · ✓ approvals · ✗ changes · N awaiting · 🏷 labels · updated 2h ago`.
    The CI badge is text first (`✓ CI` passing, `✗ CI` failing, `… CI` running, `– CI` none)
    with colour as a secondary cue, so it reads without colour vision — the same reason the

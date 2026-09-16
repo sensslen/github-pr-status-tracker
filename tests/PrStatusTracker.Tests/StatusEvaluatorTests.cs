@@ -60,10 +60,18 @@ public class StatusEvaluatorTests
     public void Author_draft() =>
         Assert.Equal(PrStatus.Draft, StatusEvaluator.Evaluate(Pr(author: Me, draft: true), Me));
 
-    [Fact]
-    public void Author_conflict_beats_everything() =>
-        Assert.Equal(PrStatus.MergeConflict,
-            StatusEvaluator.Evaluate(Pr(author: Me, mergeable: Mergeable.Conflicting, decision: ReviewDecision.Approved, checks: CheckState.Failure), Me));
+    /// <summary>A conflict is yours to fix either way; what it changes is which bucket you fix it from.
+    /// Only a PR that is otherwise ready to merge is called out in *Ready to merge* rather than *Needs you*.</summary>
+    [Theory]
+    [InlineData(ReviewDecision.Approved, CheckState.Success, PrStatus.ReadyToMergeConflict)]
+    [InlineData(ReviewDecision.Approved, null, PrStatus.ReadyToMergeConflict)]           // repo with no checks
+    [InlineData(ReviewDecision.Approved, CheckState.Pending, PrStatus.MergeConflict)]    // not ready until they land
+    [InlineData(ReviewDecision.Approved, CheckState.Failure, PrStatus.MergeConflict)]
+    [InlineData(ReviewDecision.ChangesRequested, CheckState.Success, PrStatus.MergeConflict)]
+    [InlineData(null, CheckState.Success, PrStatus.MergeConflict)]                       // nobody has signed off
+    public void Author_conflict(ReviewDecision? decision, CheckState? checks, PrStatus expected) =>
+        Assert.Equal(expected, StatusEvaluator.Evaluate(
+            Pr(author: Me, mergeable: Mergeable.Conflicting, decision: decision, checks: checks), Me));
 
     [Fact]
     public void Author_checks_failing_beats_review_state() =>
@@ -116,6 +124,7 @@ public class StatusEvaluatorTests
     [InlineData(PrStatus.ChangesRequested, PrBucket.NeedsYou)]
     [InlineData(PrStatus.NoReviewers, PrBucket.NeedsYou)]
     [InlineData(PrStatus.ReadyToMerge, PrBucket.ReadyToMerge)]
+    [InlineData(PrStatus.ReadyToMergeConflict, PrBucket.ReadyToMerge)]
     [InlineData(PrStatus.YouApproved, PrBucket.WaitingOnOthers)]
     [InlineData(PrStatus.YouRequestedChanges, PrBucket.WaitingOnOthers)]
     [InlineData(PrStatus.YouCommented, PrBucket.WaitingOnOthers)]

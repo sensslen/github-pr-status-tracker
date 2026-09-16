@@ -23,6 +23,9 @@ public sealed class PrItemViewModel(TrackedPr tracked)
     public bool IsOverdue { get; } = DateTimeOffset.Now - tracked.Pr.CreatedAt > TimeSpan.FromHours(24);
     public CheckState? Checks { get; } = tracked.Pr.Checks;
 
+    /// <summary>The branch will not merge as it stands. Worth flagging even where the status pill does not say so.</summary>
+    public bool HasConflict { get; } = IsConflicted(tracked.Pr);
+
     /// <summary>One dense line: repo, author, size, review tallies, labels, last activity.</summary>
     public string Details { get; } = BuildDetails(tracked.Pr);
 
@@ -47,7 +50,7 @@ public sealed class PrItemViewModel(TrackedPr tracked)
             parts.Add($"{pr.RequestedReviewers.Count} awaiting");
         }
 
-        if (pr.Mergeable == Mergeable.Conflicting)
+        if (IsConflicted(pr))
         {
             parts.Add("conflicts");
         }
@@ -60,6 +63,8 @@ public sealed class PrItemViewModel(TrackedPr tracked)
         parts.Add($"updated {FormatAge(pr.UpdatedAt)} ago");
         return string.Join(" · ", parts);
     }
+
+    private static bool IsConflicted(PullRequest pr) => pr.Mergeable == Mergeable.Conflicting;
 
     internal static string FormatAge(DateTimeOffset when)
     {
@@ -354,10 +359,17 @@ public sealed partial class MainViewModel : ObservableObject
             group.Replace([.. items.Where(i => i.Status.Bucket() == group.Bucket)], group.Filterable ? filter : PrFilter.None);
         }
 
+        // A conflicted PR is still counted as ready — it is one rebase from mergeable — but the count has to say
+        // so, or the summary and the tray tooltip promise something to merge that will not merge.
+        var conflicted = items.Count(i => i.Status == PrStatus.ReadyToMergeConflict);
+        var ready = conflicted == 0
+            ? $"{ReadyToMerge.TotalCount} ready to merge"
+            : $"{ReadyToMerge.TotalCount} ready to merge ({conflicted} conflicted)";
+
         // Summary and tray always describe everything, whatever the window is narrowed to.
         Summary = items.Count == 0
             ? "No open pull requests"
-            : $"{NeedsYou.TotalCount} need you · {WaitingOnOthers.TotalCount} waiting · {ReadyToMerge.TotalCount} ready to merge";
+            : $"{NeedsYou.TotalCount} need you · {WaitingOnOthers.TotalCount} waiting · {ready}";
         RefreshTrayState();
     }
 

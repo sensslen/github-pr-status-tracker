@@ -354,10 +354,18 @@ Both are per-user and need no elevation. The app starts hidden when launched wit
 
 ## 8. Packaging
 
-- **Windows** — self-contained `win-x64` publish wrapped in an installer that creates the
-  Start Menu shortcut carrying the AUMID that toasts require.
-- **macOS** — `osx-arm64` and `osx-x64` publishes bundled into a signed, notarized `.app`;
-  signing is what makes native notifications work.
+A `vX.Y.Z` tag builds both, on the system each installs on, and publishes them as a GitHub
+release. NativeAOT, so neither carries a .NET runtime. Scripts under `packaging/`.
+
+- **Windows** — `win-x64` publish wrapped in an NSIS installer (`packaging/windows/installer.nsi`).
+  Per-user, so no elevation. It creates the Start Menu shortcut and registers the AUMID under
+  `HKCU\Software\Classes\AppUserModelId`, which is what gives a toast the app's name and icon
+  instead of the bare identifier.
+- **macOS** — `osx-arm64` and `osx-x64` publishes wrapped in an `LSUIElement` `.app`
+  (`packaging/macos/make-bundle.sh`) and shipped as a disk image per architecture.
+- **Not signed.** The bundle is ad-hoc signed, which is the least Gatekeeper accepts as openable;
+  a Developer ID and notarization, which `UNUserNotificationCenter` notifications would need, are
+  not set up. Windows setup is unsigned and meets SmartScreen.
 
 ---
 
@@ -380,8 +388,8 @@ Each phase ends with something runnable.
 
 ### Progress
 
-Phases 1–6 are implemented and the app runs against live data on Windows. Phase 7
-(packaging, signing, notarization) has not started. macOS code paths compile but have not
+Phases 1–7 are implemented and the app runs against live data on Windows; signing and
+notarization are the part of phase 7 that is not done. macOS code paths compile but have not
 been run on a Mac.
 
 ### Known unknowns

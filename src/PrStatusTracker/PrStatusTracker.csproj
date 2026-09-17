@@ -7,6 +7,7 @@
     <RootNamespace>PrStatusTracker</RootNamespace>
     <AssemblyName>PrStatusTracker</AssemblyName>
     <ApplicationManifest Condition="Exists('app.manifest')">app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\packaging\icon\AppIcon.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Surface trimming / AOT problems in every build, not just at publish time. -->
@@ -15,13 +16,17 @@
   </PropertyGroup>
 
   <!--
-    `dotnet publish -c Release -r <rid>` produces one self-contained executable: the Avalonia native libraries
-    (Skia, HarfBuzz, ANGLE) are embedded and unpacked to the user's temp folder on first run. Add
-    -p:PublishAot=true for a NativeAOT build; that needs the platform C++ toolchain (VS "Desktop development
-    with C++" on Windows, Xcode command-line tools on macOS).
+    `dotnet publish -c Release -r <rid>` produces a NativeAOT build: a native executable needing no .NET
+    install, next to the Avalonia native libraries (Skia, HarfBuzz, ANGLE), which stay separate files because
+    they are not managed code to compile in. A folder rather than one file is what the installers package.
+    NativeAOT needs the platform C++ toolchain, so a machine without the Visual Studio "Desktop development
+    with C++" workload or the Xcode command-line tools fails at the link step and wants -p:PublishAot=false,
+    which falls back to the single-file bundle below.
   -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' != ''">
+    <PublishAot Condition="'$(PublishAot)' == ''">true</PublishAot>
     <SelfContained>true</SelfContained>
+    <StripSymbols>true</StripSymbols>
     <PublishSingleFile Condition="'$(PublishAot)' != 'true'">true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>

@@ -1,0 +1,133 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# NativeAOT cannot cross compile between operating systems, so each installer is built on the
+# system it installs on. macOS builds both of its architectures because it is the only host that
+# can.
+#
+# Nothing is signed. On Windows that means a SmartScreen warning; on macOS the bundle is ad-hoc
+# signed and the release notes say what to do about the dialog it produces.
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runs-on: windows-latest
+          - rid: osx-arm64
+            runs-on: macos-latest
+          - rid: osx-x64
+            runs-on: macos-latest
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      # v1.2.3 is the version; FILEVERSION is for the Win32 version resource, which takes four
+      # numbers and no prerelease suffix.
+      - name: Read the version from the tag
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "FILEVERSION=${version%%-*}.0" >> "$GITHUB_ENV"
+
+      # NativeAOT, so the result needs no .NET install. Publishing is what links it, and the C++
+      # toolchain it needs for that is already on both runner images.
+      - name: Publish
+        run: >
+          dotnet publish src/PrStatusTracker -c Release -r ${{ matrix.rid }} -o publish
+          -p:Version=${{ env.VERSION }}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Package (Windows)
+        if: startsWith(matrix.rid, 'win-')
+        shell: pwsh
+        run: |
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) {
+            choco install nsis -y --no-progress
+          }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $out = [System.IO.Path]::GetFullPath("artifacts/PrStatusTracker-${env:VERSION}-${{ matrix.rid }}-setup.exe")
+          # Each switch is passed as its own quoted string. Bare words containing quotes are parsed
+          # in argument mode, where the inner quotes end the token early.
+          $switches = @(
+            "/DVERSION=${env:VERSION}"
+            "/DFILEVERSION=${env:FILEVERSION}"
+            "/DSOURCE=$([System.IO.Path]::GetFullPath('publish'))"
+            "/DOUTFILE=$out"
+          )
+          & $nsis @switches packaging/windows/installer.nsi
+          if (-not (Test-Path $out)) { throw "makensis produced no installer" }
+
+      - name: Package (macOS)
+        if: startsWith(matrix.rid, 'osx-')
+        run: |
+          brew install create-dmg
+          mkdir -p artifacts staging
+          packaging/macos/make-bundle.sh publish "$VERSION" "staging/PR Status Tracker.app"
+
+          dmg="artifacts/PrStatusTracker-$VERSION-${{ matrix.rid }}.dmg"
+          # create-dmg reports failure when it cannot set a volume icon, which is not fatal, so the
+          # result is judged by whether the image exists.
+          create-dmg \
+            --volname "PR Status Tracker" \
+            --app-drop-link 480 170 \
+            --icon "PR Status Tracker.app" 160 170 \
+            --window-size 640 360 \
+            "$dmg" "staging/PR Status Tracker.app" || true
+          test -f "$dmg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.rid }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: artifacts/*
+          body: |
+            Install the [GitHub CLI](https://cli.github.com/) and run `gh auth login` once. The app
+            has no credentials of its own and reads GitHub through `gh`.
+
+            ### Windows
+
+            `PrStatusTracker-*-win-x64-setup.exe` installs for the current user, no administrator
+            needed. It is unsigned, so SmartScreen asks: **More info** then **Run anyway**.
+
+            ### macOS
+
+            Open the `.dmg` for your Mac (`osx-arm64` for Apple Silicon, `osx-x64` for Intel) and
+            drag the app to Applications. The bundle is signed ad-hoc rather than with a Developer
+            ID, so macOS asks before opening it: open **System Settings > Privacy & Security** and
+            choose **Open Anyway**, or clear the download flag once:
+
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/PR Status Tracker.app"
+            ```

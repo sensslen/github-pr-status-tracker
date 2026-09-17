@@ -59,7 +59,9 @@ VIAddVersionKey "FileDescription" "${APPNAME} setup"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 !define MUI_FINISHPAGE_RUN_PARAMETERS "--tray"
 
-!insertmacro MUI_PAGE_DIRECTORY
+; No directory page. Uninstall removes $INSTDIR whole, so a directory the user picked and already
+; had something in is a directory this takes with it. A per-user tray application has one right
+; place to live anyway.
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -131,6 +133,10 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  ; The confirmation page sits between un.onInit and here, which is long enough to start the
+  ; application from its Start Menu shortcut and have its files locked against the deletion below.
+  Call un.WaitForExit
+
   Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
   RMDir "$SMPROGRAMS\${APPNAME}"
 

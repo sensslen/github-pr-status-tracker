@@ -11,11 +11,10 @@ namespace PrStatusTracker.Notifications;
 /// </summary>
 public sealed class WindowsNotifier : INotifier
 {
-    // The AUMID a toast is shown under is what Action Center attributes it to, and Windows takes the name it
-    // displays from the Start Menu shortcut carrying that ID. There is no such shortcut until the app is
-    // installed, so Windows falls back to rendering the ID itself - which is why this is the bare app name and
-    // not a dotted identifier. Borrowing PowerShell's own AUMID, as this used to, read as "Windows PowerShell".
-    // Packaging (section 8) adds the shortcut, and with it a spaced display name and the app's icon.
+    // The AUMID a toast is shown under is what Action Center attributes it to. Windows reads the name and icon
+    // to display from HKCU\Software\Classes\AppUserModelId\<AUMID>, which only the installer writes, so an
+    // uninstalled run falls back to rendering the ID itself - which is why this is the bare app name and not a
+    // dotted identifier. Borrowing PowerShell's own AUMID, as this used to, read as "Windows PowerShell".
     private const string AppId = "PrStatusTracker";
 
     public Task ShowAsync(Toast toast, CancellationToken ct = default)

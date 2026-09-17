@@ -252,12 +252,13 @@ Rules that keep the noise down:
 - **Windows** — the WinRT toast API, driven through a short Windows PowerShell script
   (`-EncodedCommand`). This avoids a Windows-only TFM, works with no installer, and uses
   protocol activation, so clicking it opens the PR URL. The toast is shown under the app's own
-  AUMID (`PrStatusTracker`). Windows takes the name it puts on a toast from the Start Menu
-  shortcut carrying that AUMID; with no shortcut yet it renders the AUMID itself, so toasts
-  read `PrStatusTracker` rather than `Windows PowerShell` as they did when this borrowed
-  PowerShell's AUMID. The shortcut the installer creates (section 8) is what turns that into a
-  spaced display name and the app's icon — no code change needed. The packaging phase can also
-  swap the script for `CommunityToolkit.WinUI.Notifications`.
+  AUMID (`PrStatusTracker`). For an application that is not packaged, Windows takes the name and
+  icon it puts on a toast from `HKCU\Software\Classes\AppUserModelId\PrStatusTracker`; with that
+  key absent it renders the AUMID itself, so toasts read `PrStatusTracker` rather than
+  `Windows PowerShell` as they did when this borrowed PowerShell's AUMID. The installer writes
+  that key (section 8), which is what turns it into a spaced display name and the app's icon,
+  with no code change needed. The packaging phase can also swap the script for
+  `CommunityToolkit.WinUI.Notifications`.
 - **macOS** — `osascript -e "display notification ..."`. This is the unsigned-build
   fallback; `UNUserNotificationCenter` (with click-through to the PR) needs a signed `.app`
   bundle and is deferred to packaging.
@@ -354,10 +355,18 @@ Both are per-user and need no elevation. The app starts hidden when launched wit
 
 ## 8. Packaging
 
-- **Windows** — self-contained `win-x64` publish wrapped in an installer that creates the
-  Start Menu shortcut carrying the AUMID that toasts require.
-- **macOS** — `osx-arm64` and `osx-x64` publishes bundled into a signed, notarized `.app`;
-  signing is what makes native notifications work.
+A `vX.Y.Z` tag builds both, on the system each installs on, and publishes them as a GitHub
+release. NativeAOT, so neither carries a .NET runtime. Scripts under `packaging/`.
+
+- **Windows** — `win-x64` publish wrapped in an NSIS installer (`packaging/windows/installer.nsi`).
+  Per-user, so no elevation. It creates the Start Menu shortcut and registers the AUMID under
+  `HKCU\Software\Classes\AppUserModelId`, which is what gives a toast the app's name and icon
+  instead of the bare identifier.
+- **macOS** — `osx-arm64` and `osx-x64` publishes wrapped in an `LSUIElement` `.app`
+  (`packaging/macos/make-bundle.sh`) and shipped as a disk image per architecture.
+- **Not signed.** The bundle is ad-hoc signed, which is the least Gatekeeper accepts as openable;
+  a Developer ID and notarization, which `UNUserNotificationCenter` notifications would need, are
+  not set up. Windows setup is unsigned and meets SmartScreen.
 
 ---
 
@@ -380,8 +389,8 @@ Each phase ends with something runnable.
 
 ### Progress
 
-Phases 1–6 are implemented and the app runs against live data on Windows. Phase 7
-(packaging, signing, notarization) has not started. macOS code paths compile but have not
+Phases 1–7 are implemented and the app runs against live data on Windows; signing and
+notarization are the part of phase 7 that is not done. macOS code paths compile but have not
 been run on a Mac.
 
 ### Known unknowns

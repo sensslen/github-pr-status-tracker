@@ -39,7 +39,8 @@ It answers one question, quickly, without opening a browser:
 - **[GitHub CLI (`gh`)](https://cli.github.com/)** installed and authenticated
   (`gh auth login`). The app shells out to `gh` for all GitHub access — it never asks
   you for a token and never stores credentials of its own.
-- **.NET 10 runtime** (or a self-contained build, which bundles it).
+- **No .NET install** for a released build; it is native. Building from source needs the
+  [.NET 10 SDK](https://dotnet.microsoft.com/download).
 - Windows 10 1809+ or macOS 12+.
 
 ## Getting started
@@ -80,23 +81,20 @@ native autostart entry (Registry `Run` key on Windows, a `LaunchAgent` plist on 
 dotnet test
 ```
 
+Every pull request builds and runs them on Windows and macOS
+(`.github/workflows/ci.yml`).
+
 ### Publish
 
-A Release publish with a runtime identifier produces **one self-contained executable** —
-no .NET install needed, and the Avalonia native libraries (Skia, HarfBuzz, ANGLE) are
-embedded and unpacked to the user's temp folder on first run. The single-file settings live
-in the csproj, so the command is just:
+A Release publish with a runtime identifier produces a **NativeAOT build**: a native executable
+that needs no .NET install, next to the three Avalonia native libraries it loads at run time
+(Skia, HarfBuzz, ANGLE). The settings live in the csproj, so the command is just:
 
 **Windows (x64)**
 
 ```bash
 dotnet publish src/PrStatusTracker -c Release -r win-x64
 ```
-
-Output: `src/PrStatusTracker/bin/Release/net10.0/win-x64/publish/PrStatusTracker.exe`
-(~50 MB, compressed). Copy it anywhere. Toasts work out of the box (they go through Windows
-PowerShell's notification API). Until there is an installer to create the Start Menu shortcut,
-Windows has no display name for the app and labels them `PrStatusTracker`.
 
 **macOS (Apple Silicon / Intel)**
 
@@ -108,18 +106,48 @@ dotnet publish src/PrStatusTracker -c Release -r osx-arm64
 dotnet publish src/PrStatusTracker -c Release -r osx-x64
 ```
 
-The result is a bare executable, which is enough to run from a terminal. For a proper
-menu-bar app (Dock-less, Finder-launchable, real notifications) it needs to be wrapped in a
-`.app` bundle with `LSUIElement` set, signed, and notarized — that is the packaging phase in
-[ARCHITECTURE.md](ARCHITECTURE.md#8-packaging) and is not scripted yet.
+Output: `src/PrStatusTracker/bin/Release/net10.0/<rid>/publish/`, about 37 MB.
 
-**NativeAOT (optional)**
+NativeAOT links with the platform C++ toolchain: the Visual Studio *Desktop development with C++*
+workload on Windows, the Xcode command-line tools on macOS. Without it the link step fails
+(`vswhere.exe` not found on Windows), and `-p:PublishAot=false` falls back to a single-file build
+that carries the .NET runtime with it instead.
 
-The code is AOT-clean (JSON goes through a source-generated context; Avalonia and the
-Declarative markup support AOT), so you can add `-p:PublishAot=true` to any command above
-for a faster-starting native binary. This needs the platform C++ toolchain: on Windows the
-Visual Studio *Desktop development with C++* workload, on macOS the Xcode command-line
-tools. Without it the build fails at the link step (`vswhere.exe` not found on Windows).
+### Installers
+
+Pushing a `vX.Y.Z` tag publishes a GitHub release with a Windows installer and a disk image per
+Mac architecture (`.github/workflows/release.yml`). Nothing is signed, so Windows shows a
+SmartScreen warning and macOS asks before opening the app.
+
+To build either one by hand from a publish directory:
+
+**Windows** — [NSIS](https://nsis.sourceforge.io/) 3:
+
+```bash
+makensis /DVERSION=1.2.3 /DFILEVERSION=1.2.3.0 \
+         /DSOURCE=<absolute publish dir> /DOUTFILE=<absolute setup.exe path> \
+         packaging/windows/installer.nsi
+```
+
+Both paths have to be absolute. makensis compiles from the script's own directory, so a
+relative source fails to open and a relative output lands in `packaging/windows/`.
+
+It installs for the current user, so it needs no administrator, and it registers the Start Menu
+shortcut and the notification identity that give toasts the app's name and icon rather than
+`PrStatusTracker`.
+
+**macOS**:
+
+```bash
+packaging/macos/make-bundle.sh <publish dir> 1.2.3 "PR Status Tracker.app"
+```
+
+It wraps the publish output in a menu-bar (`LSUIElement`) bundle and ad-hoc signs it. A Developer
+ID signature and notarization, which is what native `UNUserNotificationCenter` notifications
+would need, are not set up.
+
+Both read their icons from `packaging/icon/`, which `packaging/icon/make-icons.py` regenerates
+from the app's own window icon.
 
 ## Tech stack
 
@@ -136,7 +164,8 @@ tools. Without it the build fails at the link step (`vswhere.exe` not found on W
 
 ## Status
 
-Working prototype. Phases 1–6 of the [implementation plan](ARCHITECTURE.md#implementation-plan)
+Working prototype. Phases 1–7 of the [implementation plan](ARCHITECTURE.md#implementation-plan)
 are in place: tray icon with tooltip summary, `gh`-backed polling, the status model with
 tests, change detection, native toasts (Windows verified; macOS untested), persisted
-notification history, settings, and start-at-login. Packaging (phase 7) has not started.
+notification history, settings, start-at-login, and the installers. Signing and notarization
+are not set up.

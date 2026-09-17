@@ -12,6 +12,9 @@ version=${2:?version is required}
 bundle=${3:?output bundle path is required}
 
 executable=PrStatusTracker
+# Both plist version keys take period-separated integers and nothing else, so a prerelease tag such
+# as v1.2.3-beta leaves its suffix behind rather than writing metadata macOS will not read.
+bundle_version=${version%%-*}
 # The same identifier MacAutoStart gives its LaunchAgent, so the app has one identity on the system.
 identifier=com.prstatustracker
 
@@ -36,8 +39,8 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>$identifier</string>
   <key>CFBundleExecutable</key><string>$executable</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleVersion</key><string>$version</string>
-  <key>CFBundleShortVersionString</key><string>$version</string>
+  <key>CFBundleVersion</key><string>$bundle_version</string>
+  <key>CFBundleShortVersionString</key><string>$bundle_version</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>

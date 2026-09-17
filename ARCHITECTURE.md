@@ -252,12 +252,13 @@ Rules that keep the noise down:
 - **Windows** — the WinRT toast API, driven through a short Windows PowerShell script
   (`-EncodedCommand`). This avoids a Windows-only TFM, works with no installer, and uses
   protocol activation, so clicking it opens the PR URL. The toast is shown under the app's own
-  AUMID (`PrStatusTracker`). Windows takes the name it puts on a toast from the Start Menu
-  shortcut carrying that AUMID; with no shortcut yet it renders the AUMID itself, so toasts
-  read `PrStatusTracker` rather than `Windows PowerShell` as they did when this borrowed
-  PowerShell's AUMID. The shortcut the installer creates (section 8) is what turns that into a
-  spaced display name and the app's icon — no code change needed. The packaging phase can also
-  swap the script for `CommunityToolkit.WinUI.Notifications`.
+  AUMID (`PrStatusTracker`). For an application that is not packaged, Windows takes the name and
+  icon it puts on a toast from `HKCU\Software\Classes\AppUserModelId\PrStatusTracker`; with that
+  key absent it renders the AUMID itself, so toasts read `PrStatusTracker` rather than
+  `Windows PowerShell` as they did when this borrowed PowerShell's AUMID. The installer writes
+  that key (section 8), which is what turns it into a spaced display name and the app's icon,
+  with no code change needed. The packaging phase can also swap the script for
+  `CommunityToolkit.WinUI.Notifications`.
 - **macOS** — `osascript -e "display notification ..."`. This is the unsigned-build
   fallback; `UNUserNotificationCenter` (with click-through to the PR) needs a signed `.app`
   bundle and is deferred to packaging.

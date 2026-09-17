@@ -5,14 +5,13 @@ on:
     branches: [main]
   pull_request:
 
-# The application is built for Windows and macOS, so a pull request is built and tested on both,
-# and on Linux because it is the cheapest host for the checks that read only the source.
+# The application ships for Windows and macOS, so a pull request is built and tested on both.
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -28,6 +27,7 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build
 
+      # Windows only: .editorconfig asks for CRLF, and that is the only checkout that has it.
       - name: Format
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'windows-latest'
         run: dotnet format --verify-no-changes

@@ -81,7 +81,7 @@ native autostart entry (Registry `Run` key on Windows, a `LaunchAgent` plist on 
 dotnet test
 ```
 
-Every pull request builds and runs them on Linux, Windows and macOS
+Every pull request builds and runs them on Windows and macOS
 (`.github/workflows/ci.yml`).
 
 ### Publish

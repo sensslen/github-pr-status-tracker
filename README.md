@@ -125,8 +125,12 @@ To build either one by hand from a publish directory:
 
 ```bash
 makensis /DVERSION=1.2.3 /DFILEVERSION=1.2.3.0 \
-         /DSOURCE=<publish dir> /DOUTFILE=setup.exe packaging/windows/installer.nsi
+         /DSOURCE=<absolute publish dir> /DOUTFILE=<absolute setup.exe path> \
+         packaging/windows/installer.nsi
 ```
+
+Both paths have to be absolute. makensis compiles from the script's own directory, so a
+relative source fails to open and a relative output lands in `packaging/windows/`.
 
 It installs for the current user, so it needs no administrator, and it registers the Start Menu
 shortcut and the notification identity that give toasts the app's name and icon rather than

@@ -10,7 +10,7 @@ using PrStatusTracker.Platform;
 
 namespace PrStatusTracker.ViewModels;
 
-public sealed class PrItemViewModel(TrackedPr tracked)
+public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 {
     public PullRequest Pr { get; } = tracked.Pr;
     public string Title { get; } = tracked.Pr.Title;
@@ -28,6 +28,9 @@ public sealed class PrItemViewModel(TrackedPr tracked)
 
     /// <summary>One dense line: repo, author, size, review tallies, labels, last activity.</summary>
     public string Details { get; } = BuildDetails(tracked.Pr);
+
+    /// <summary>Marked by the user as one they are working through; starred rows sort to the top of their bucket.</summary>
+    public bool IsStarred { get; } = isStarred;
 
     private static string BuildDetails(PullRequest pr)
     {
@@ -122,6 +125,7 @@ public sealed partial class MainViewModel : ObservableObject
     public const string AnyRepo = "Any repo";
 
     private readonly PrStore _store;
+    private readonly StarStore _stars;
     private readonly PollingService _poller;
     private readonly NotificationService _notifications;
     private readonly AppSettings _settings;
@@ -133,10 +137,11 @@ public sealed partial class MainViewModel : ObservableObject
     private bool _rebuildingOptions;
     private string? _localMessage; // shown in the banner when there is no poll error
 
-    public MainViewModel(PrStore store, PollingService poller, NotificationService notifications, AppSettings settings,
-        JsonFileStore<AppSettings> settingsFile, IAutoStart autoStart, GhCommandRunner gh)
+    public MainViewModel(PrStore store, StarStore stars, PollingService poller, NotificationService notifications,
+        AppSettings settings, JsonFileStore<AppSettings> settingsFile, IAutoStart autoStart, GhCommandRunner gh)
     {
         _store = store;
+        _stars = stars;
         _poller = poller;
         _notifications = notifications;
         _settings = settings;
@@ -147,6 +152,7 @@ public sealed partial class MainViewModel : ObservableObject
         _groups = [NeedsYou, WaitingOnOthers, ReadyToMerge];
 
         store.Updated += () => Dispatcher.UIThread.Post(RefreshGroups);
+        stars.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
         poller.StateChanged += () => Dispatcher.UIThread.Post(RefreshPollerState);
         notifications.HistoryChanged += () => Dispatcher.UIThread.Post(RefreshNotifications);
 
@@ -324,6 +330,10 @@ public sealed partial class MainViewModel : ObservableObject
 
     public Task RefreshAsync() => _poller.RefreshNowAsync();
     public static void OpenPr(PrItemViewModel item) => Browser.Open(item.Url);
+
+    /// <summary>The store raises its own change event, which re-sorts and rebuilds the rows.</summary>
+    public void ToggleStar(PrItemViewModel item) => _stars.Toggle(item.Pr.Key);
+
     public void Dismiss(NotificationRecord record) => _notifications.Dismiss(record);
     public void DismissAll() => _notifications.DismissAll();
     public static void OpenNotification(NotificationRecord record) => Browser.Open(record.Url);
@@ -348,8 +358,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void RefreshGroups()
     {
-        // Oldest PR first, regardless of status: the ones that have waited longest come to the top.
-        var items = _store.Current.OrderBy(t => t.Pr.CreatedAt).Select(t => new PrItemViewModel(t)).ToList();
+        // Starred first — those are the ones being worked on right now — then oldest PR first regardless of
+        // status, so the ones that have waited longest come to the top.
+        var items = _store.Current
+            .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key)))
+            .OrderByDescending(i => i.IsStarred)
+            .ThenBy(i => i.Pr.CreatedAt)
+            .ToList();
         RebuildOptions(items);
 
         var filter = Filter;

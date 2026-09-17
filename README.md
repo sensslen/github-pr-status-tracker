@@ -18,6 +18,9 @@ It answers one question, quickly, without opening a browser:
 - **Notifies you when a PR's state changes** — a review lands on your PR, a new PR is
   assigned to you, CI goes red, your PR becomes mergeable. Notifications use native OS
   toasts.
+- **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
+  their tab and are marked in the tray popup. The star is local to the app; nothing is
+  sent to GitHub.
 - **Keeps a notification history** — every notification is written to disk so you can
   dismiss it, come back to it later, and see what you missed while away.
 
@@ -30,6 +33,7 @@ It answers one question, quickly, without opening a browser:
 | Click the tray icon | Compact popup pinned by the tray: a *Needs you / Waiting / Ready* switch with counts, the selected list, and a button to the main window |
 | Right-click the tray icon | Menu: open main window, refresh, open GitHub, quit |
 | Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Ready to merge*), plus Notifications and Settings; every row opens its PR |
+| Star a row (☆) | Pins that PR to the top of its tab and marks it ★ in the tray popup; persists across restarts. Click ★ again to unstar |
 | Filter bar | On the *Needs you* and *Waiting on others* tabs: free text (title, repo, author, label, `#number`) plus author / label / repo dropdowns; never affects the tray |
 | Toast notification | One toast per poll, however many PRs changed; clicking it opens the PR (or GitHub's PR list for a batch) |
 | Notification centre (in-app) | Persisted, dismissible list of past notifications |
@@ -167,5 +171,5 @@ from the app's own window icon.
 Working prototype. Phases 1–7 of the [implementation plan](ARCHITECTURE.md#implementation-plan)
 are in place: tray icon with tooltip summary, `gh`-backed polling, the status model with
 tests, change detection, native toasts (Windows verified; macOS untested), persisted
-notification history, settings, start-at-login, and the installers. Signing and notarization
+notification history, starred PRs, settings, start-at-login, and the installers. Signing and notarization
 are not set up.

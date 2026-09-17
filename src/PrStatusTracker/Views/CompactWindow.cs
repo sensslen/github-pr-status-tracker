@@ -93,11 +93,12 @@ public sealed class CompactWindow : Window
                 new ItemsControl().Margin(0, 2, 0, 6).ItemsSource(group.Items).ItemTemplate(Template<PrItemViewModel>(item => CompactRow(item)))),
             EmptyLabel(group.EmptyText).Margin(12, 8).IsVisible(group, g => g.IsEmpty));
 
-    /// <summary>Single line: [CI badge] title … age.</summary>
+    /// <summary>Single line: [CI badge] [★ if starred] title … age.</summary>
     private static Button CompactRow(PrItemViewModel item) =>
         Row(
             new DockPanel().Children(
                 CheckBadge(item.Checks).DockPanel_Dock(Dock.Left).Margin(0, 0, 8, 0),
+                StarMarker(item).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
                 ConflictMarker(item).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
                 AgeLabel(item).DockPanel_Dock(Dock.Right).Margin(8, 0, 0, 0),
                 new TextBlock().Text(item.Title).FontSize(12).VerticalAlignment(VerticalAlignment.Center)

@@ -15,6 +15,7 @@ public static class AppPaths
     public static string Settings => Path.Combine(DataDirectory, "settings.json");
     public static string Notifications => Path.Combine(DataDirectory, "notifications.json");
     public static string Snapshot => Path.Combine(DataDirectory, "snapshot.json");
+    public static string Stars => Path.Combine(DataDirectory, "stars.json");
 }
 
 /// <summary>Load/save one JSON document. Writes are atomic; a corrupt file is set aside, not fatal.</summary>

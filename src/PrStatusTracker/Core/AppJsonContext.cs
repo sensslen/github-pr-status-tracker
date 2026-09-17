@@ -14,4 +14,5 @@ namespace PrStatusTracker.Core;
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(List<TrackedPr>))]
 [JsonSerializable(typeof(List<NotificationRecord>))]
+[JsonSerializable(typeof(List<string>))]
 internal sealed partial class AppJsonContext : JsonSerializerContext;

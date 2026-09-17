@@ -29,10 +29,13 @@ internal static class TestData
     public static TrackedPr Tracked(PrStatus status, int number = 1, string author = Other) =>
         new(Pr(number: number, author: author), status);
 
+    /// <summary>A fresh path in the tests' scratch directory. Nothing is created until something writes there.</summary>
+    public static string TempPath() => Path.Combine(Path.GetTempPath(), "prst-tests", Guid.NewGuid() + ".json");
+
     /// <summary>A store backed by a fresh temp file; the returned path lets the test reopen or delete it.</summary>
     public static PrStore TempStore(out string path)
     {
-        path = Path.Combine(Path.GetTempPath(), "prst-tests", Guid.NewGuid() + ".json");
+        path = TempPath();
         return new PrStore(new JsonFileStore<List<TrackedPr>>(path));
     }
 }

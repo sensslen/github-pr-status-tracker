@@ -33,10 +33,13 @@ public sealed class App : Application
         var gh = new GhCommandRunner();
         var github = new GitHubClient(gh);
         var store = new PrStore(new JsonFileStore<List<TrackedPr>>(AppPaths.Snapshot));
+        var stars = new StarStore(new JsonFileStore<List<string>>(AppPaths.Stars));
+        // A star outlives nothing: once a PR leaves the snapshot there is nothing left to star.
+        store.Updated += () => stars.Retain(store.Current.Select(t => t.Key));
         var notifications = new NotificationService(store, Notifier.ForCurrentPlatform(),
             new JsonFileStore<List<NotificationRecord>>(AppPaths.Notifications), () => settings);
         var poller = new PollingService(github, store, () => settings);
-        var vm = new MainViewModel(store, poller, notifications, settings, settingsFile, AutoStart.ForCurrentPlatform(), gh);
+        var vm = new MainViewModel(store, stars, poller, notifications, settings, settingsFile, AutoStart.ForCurrentPlatform(), gh);
 
         var appIcon = new WindowIcon(AssetLoader.Open(new Uri("avares://PrStatusTracker/Assets/github.png")));
         var window = new Window()

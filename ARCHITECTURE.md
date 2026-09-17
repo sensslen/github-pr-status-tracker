@@ -56,6 +56,7 @@ src/PrStatusTracker/
     StatusEvaluator.cs        // the rules in section 4
     PrFilter.cs               // main-window filter rules (text + author/label/repo)
     PrStore.cs                // snapshot + diffing
+    StarStore.cs              // the PRs you starred, persisted
     PollingService.cs
     JsonFileStore.cs          // load/save for settings, snapshot, notifications
   Notifications/
@@ -78,6 +79,7 @@ src/PrStatusTracker/
 tests/PrStatusTracker.Tests/
   StatusEvaluatorTests.cs     // the rules tables, case by case
   PrFilterTests.cs
+  StarStoreTests.cs
   PrStoreDiffTests.cs
   GitHubClientParseTests.cs   // parsing against Fixtures/graphql-response.json
   NotificationServiceTests.cs
@@ -265,7 +267,7 @@ Rules that keep the noise down:
 
 ### Persistence
 
-Three JSON files under the platform app-data directory
+Four JSON files under the platform app-data directory
 (`%LOCALAPPDATA%\PrStatusTracker\` on Windows,
 `~/Library/Application Support/PrStatusTracker/` on macOS):
 
@@ -274,6 +276,7 @@ Three JSON files under the platform app-data directory
 | `settings.json` | poll interval and notification prefs (start-at-login lives in the OS, not here) |
 | `notifications.json` | rolling history, capped at 200: `Title`, `Body`, `Url`, `Timestamp`, `Dismissed` |
 | `snapshot.json` | last PR snapshot, so a restart does not re-notify everything |
+| `stars.json` | keys (`repo#number`) of the PRs you starred; pruned to the live snapshot |
 
 Writes are atomic (write to `.tmp`, then replace). A corrupt file is renamed aside and
 recreated from defaults rather than crashing the app.
@@ -301,7 +304,7 @@ movable, pinned to the tray corner (bottom-right on Windows, top-right on macOS)
 when it loses focus. A **segmented control** at the top switches between the three buckets
 (`Needs you (13) · Waiting (5) · Ready (2)`; a segmented control rather than a dropdown so
 the counts are visible and switching is one click), with the selected bucket's rows below
-as single-line `[CI badge] [⚠ if conflicted] title … age` entries, and *Open main window* / *Refresh* at the
+as single-line `[CI badge] [★ if starred] [⚠ if conflicted] title … age` entries, and *Open main window* / *Refresh* at the
 bottom. The popup is never filtered — it shows the same unfiltered set the tray counts.
 
 **Main window** — one window, a filter bar, and one tab per bucket plus two more.
@@ -320,14 +323,18 @@ Tabs:
 
 1. **Needs you / Waiting on others / Ready to merge** — tab headers carry the count.
    Every PR list is sorted **oldest PR first** (by `createdAt`), regardless of status.
+   Starred PRs sort **above** that, at the top of their bucket — they are the ones being
+   worked on right now.
    Rows are two dense lines and the whole row is a button that opens the PR:
-   `[CI badge] [status pill] Title … age` (the age turns bold, orange and gets an ⏳ once the
+   `[star] [CI badge] [status pill] Title … age` (the age turns bold, orange and gets an ⏳ once the
    PR has been open for more than 24 hours; the status pill takes its bucket's colour, except
    for `ReadyToMergeConflict`, which is orange so it stands out among the ready PRs) over
    `repo#number · author · +adds −dels · ✓ approvals · ✗ changes · N awaiting · 🏷 labels · updated 2h ago`.
    The CI badge is text first (`✓ CI` passing, `✗ CI` failing, `… CI` running, `– CI` none)
    with colour as a secondary cue, so it reads without colour vision — the same reason the
-   tray icons carry glyphs rather than relying on colour alone.
+   tray icons carry glyphs rather than relying on colour alone. The leading **star** toggles
+   whether the PR is starred (☆ dim, ★ gold); it is a nested button, so its click is marked
+   handled and does not open the PR.
 2. **Notifications (n)** — the persisted history, newest first, unread count in the header;
    each title is `<what happened> — <PR title>`. *Dismiss* per row, *Dismiss all*, and a
    *Show dismissed* toggle. Clicking a row opens the PR.

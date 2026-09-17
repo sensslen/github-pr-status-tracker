@@ -64,7 +64,7 @@ public class PrStoreDiffTests
     [Fact]
     public void Snapshot_from_an_older_build_without_newer_fields_still_loads()
     {
-        var path = Path.Combine(Path.GetTempPath(), "prst-tests", Guid.NewGuid() + ".json");
+        var path = TempPath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         // Shape written before Labels / Additions / Deletions existed.
         File.WriteAllText(path, """

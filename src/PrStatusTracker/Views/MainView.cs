@@ -53,6 +53,7 @@ internal static class ViewHelpers
     public static readonly IBrush FailBrush = new ImmutableSolidColorBrush(Color.Parse("#CF222E"));
     public static readonly IBrush PendingBrush = new ImmutableSolidColorBrush(Color.Parse("#D4A72C"));
     public static readonly IBrush NeutralBrush = new ImmutableSolidColorBrush(Color.Parse("#6E7681"));
+    public static readonly IBrush StarBrush = new ImmutableSolidColorBrush(Color.Parse("#E3B341"));
     public static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#14808080"));
     public static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
@@ -74,16 +75,45 @@ internal static class ViewHelpers
         status == PrStatus.ReadyToMergeConflict ? NeedsYouBrush : BucketBrush(status.Bucket());
 
     /// <summary>
-    /// Flags a conflict on rows too narrow for a status pill. Always built, and collapsed out of the layout when
-    /// there is nothing to flag, so the row stays a single declarative expression like every other row here.
+    /// A one-glyph flag for rows too narrow to spell anything out. Always built, and collapsed out of the layout
+    /// when there is nothing to flag, so the row stays a single declarative expression like every other row here.
     /// </summary>
-    public static TextBlock ConflictMarker(PrItemViewModel item)
+    private static TextBlock Marker(string glyph, IBrush brush, string tip, bool visible)
     {
-        var glyph = new TextBlock().Text("⚠").FontSize(11).FontWeight(FontWeight.SemiBold).Foreground(NeedsYouBrush)
+        var label = new TextBlock().Text(glyph).FontSize(11).FontWeight(FontWeight.SemiBold).Foreground(brush)
             .VerticalAlignment(VerticalAlignment.Center)
-            .IsVisible(item.HasConflict);
-        ToolTip.SetTip(glyph, "Merge conflict");
-        return glyph;
+            .IsVisible(visible);
+        if (visible)
+        {
+            ToolTip.SetTip(label, tip);
+        }
+
+        return label;
+    }
+
+    /// <summary>Flags a conflict on rows too narrow for a status pill.</summary>
+    public static TextBlock ConflictMarker(PrItemViewModel item) =>
+        Marker("⚠", NeedsYouBrush, "Merge conflict", item.HasConflict);
+
+    /// <summary>Read-only star for rows too dense to toggle on, such as the compact popup's.</summary>
+    public static TextBlock StarMarker(PrItemViewModel item) =>
+        Marker("★", StarBrush, "Starred", item.IsStarred);
+
+    /// <summary>
+    /// The star toggle on a main-window row. Filled and gold when starred, a dim outline otherwise — always
+    /// present, so the rows keep a straight left edge whether or not anything is starred.
+    /// </summary>
+    public static Button StarToggle(MainViewModel vm, PrItemViewModel item)
+    {
+        var button = new Button()
+            .Content(new TextBlock().Text(item.IsStarred ? "★" : "☆").FontSize(14)
+                .Foreground(item.IsStarred ? StarBrush : NeutralBrush)
+                .Opacity(item.IsStarred ? 1 : 0.55))
+            .Background(Brushes.Transparent).BorderThickness(0).Padding(2, 0).Cursor(HandCursor)
+            .VerticalAlignment(VerticalAlignment.Center)
+            .OnClick(e => { e.Handled = true; vm.ToggleStar(item); });
+        ToolTip.SetTip(button, item.IsStarred ? "Starred — click to unstar" : "Star this PR to keep it at the top");
+        return button;
     }
 
     public static Border Pill(string text, IBrush background) =>

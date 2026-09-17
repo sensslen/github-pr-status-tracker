@@ -85,8 +85,11 @@ Var MutexHandle
     Pop $1
     ${If} $1 = ${ERROR_ALREADY_EXISTS}
       System::Call 'kernel32::CloseHandle(i r0)'
+      ; A silent run has nobody to answer the box, and QuietUninstallString is exactly that
+      ; run, so /SD takes it to the Abort instead of leaving it on a dialog nobody sees.
       MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
-        "${APPNAME} is running. Quit it from the tray icon, then retry." IDRETRY waitloop
+        "${APPNAME} is running. Quit it from the tray icon, then retry." /SD IDCANCEL IDRETRY waitloop
+      DetailPrint "${APPNAME} is running. Quit it from the tray icon, then run this again."
       Abort
     ${EndIf}
     StrCpy $MutexHandle $0

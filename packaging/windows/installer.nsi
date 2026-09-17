@@ -71,33 +71,30 @@ VIAddVersionKey "FileDescription" "${APPNAME} setup"
 !insertmacro MUI_LANGUAGE "English"
 
 ; The executable of a running tray application is locked, so an upgrade would fail partway through
-; copying and leave an install that is half of each version. The application's own single-instance
-; mutex is what says it is running; it is unprefixed, so it lives in this session's namespace,
+; copying and leave an install that is half of each version. Testing the application's own
+; single-instance mutex only samples the moment of the test, so setup creates that mutex itself and
+; holds it for the whole of the section: a launch from the Start Menu shortcut while setup runs
+; finds the mutex taken and exits. The name is unprefixed, so it lives in this session's namespace,
 ; which is the session setup runs in.
-!macro WaitForExit un
-Function ${un}WaitForExit
+!define ERROR_ALREADY_EXISTS 183
+Var MutexHandle
+
+!macro HoldSingleInstanceMutex
   waitloop:
-    System::Call 'kernel32::OpenMutex(i 0x00100000, i 0, t "PrStatusTracker-SingleInstance") i .r0'
-    ${If} $0 <> 0
+    System::Call 'kernel32::CreateMutexW(i 0, i 0, t "PrStatusTracker-SingleInstance") i .r0 ?e'
+    Pop $1
+    ${If} $1 = ${ERROR_ALREADY_EXISTS}
       System::Call 'kernel32::CloseHandle(i r0)'
       MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
         "${APPNAME} is running. Quit it from the tray icon, then retry." IDRETRY waitloop
       Abort
     ${EndIf}
-FunctionEnd
+    StrCpy $MutexHandle $0
 !macroend
-!insertmacro WaitForExit ""
-!insertmacro WaitForExit "un."
-
-Function .onInit
-  Call WaitForExit
-FunctionEnd
-
-Function un.onInit
-  Call un.WaitForExit
-FunctionEnd
 
 Section "Install"
+  !insertmacro HoldSingleInstanceMutex
+
   SetOutPath "$INSTDIR"
 
   ; NativeAOT leaves the executable next to the Avalonia native libraries it loads at run time
@@ -130,12 +127,13 @@ Section "Install"
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "${UNINSTKEY}" "EstimatedSize" "$0"
+
+  ; The finish page launches the application, which can only start once setup has let go.
+  System::Call 'kernel32::CloseHandle(i $MutexHandle)'
 SectionEnd
 
 Section "Uninstall"
-  ; The confirmation page sits between un.onInit and here, which is long enough to start the
-  ; application from its Start Menu shortcut and have its files locked against the deletion below.
-  Call un.WaitForExit
+  !insertmacro HoldSingleInstanceMutex
 
   Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
   RMDir "$SMPROGRAMS\${APPNAME}"

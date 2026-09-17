@@ -80,12 +80,16 @@ jobs:
           dmg="artifacts/PrStatusTracker-$VERSION-${{ matrix.rid }}.dmg"
           # create-dmg reports failure when it cannot set a volume icon, which is not fatal, so the
           # result is judged by whether the image exists.
+          #
+          # Its last argument reaches hdiutil as -srcfolder, which lays that directory's contents
+          # out at the image root. It is the staging directory, so the bundle arrives whole and the
+          # drag to Applications has something to drag.
           create-dmg \
             --volname "PR Status Tracker" \
             --app-drop-link 480 170 \
             --icon "PR Status Tracker.app" 160 170 \
             --window-size 640 360 \
-            "$dmg" "staging/PR Status Tracker.app" || true
+            "$dmg" staging || true
           test -f "$dmg"
 
       - uses: actions/upload-artifact@v7

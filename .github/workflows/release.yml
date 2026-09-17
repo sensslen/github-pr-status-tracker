@@ -78,9 +78,6 @@ jobs:
           packaging/macos/make-bundle.sh publish "$VERSION" "staging/PR Status Tracker.app"
 
           dmg="artifacts/PrStatusTracker-$VERSION-${{ matrix.rid }}.dmg"
-          # create-dmg reports failure when it cannot set a volume icon, which is not fatal, so the
-          # result is judged by whether the image exists.
-          #
           # Its last argument reaches hdiutil as -srcfolder, which lays that directory's contents
           # out at the image root. It is the staging directory, so the bundle arrives whole and the
           # drag to Applications has something to drag.
@@ -90,7 +87,14 @@ jobs:
             --icon "PR Status Tracker.app" 160 170 \
             --window-size 640 360 \
             "$dmg" staging || true
-          test -f "$dmg"
+
+          # create-dmg reports failure for a cosmetic step it could not finish, the volume icon and
+          # the Finder window styling among them, so its exit status is not the question. What
+          # mounts is: an image without the bundle at its root is the failure that reaches a user.
+          mnt=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$dmg"
+          test -d "$mnt/PR Status Tracker.app"
+          hdiutil detach "$mnt"
 
       - uses: actions/upload-artifact@v7
         with:

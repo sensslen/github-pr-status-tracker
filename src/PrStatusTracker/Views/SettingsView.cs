@@ -25,12 +25,12 @@ internal static class SettingsView
                             .IsChecked(vm, x => x.StartAtLogin, BindingMode.TwoWay)),
                     Section("Notify me when a PR…",
                         new StackPanel().Spacing(4).Children(
-                            new CheckBox().Content("needs me (review requested, changes requested, checks failing, conflict)")
+                            new CheckBox().Content("needs my review (requested personally, via a team, or again)")
                                 .IsChecked(vm, x => x.NotifyNeedsYou, BindingMode.TwoWay),
-                            new CheckBox().Content("is waiting on others (approved by me, awaiting review)")
+                            new CheckBox().Content("I have already reviewed and it changed")
                                 .IsChecked(vm, x => x.NotifyWaitingOnOthers, BindingMode.TwoWay),
-                            new CheckBox().Content("is ready to merge")
-                                .IsChecked(vm, x => x.NotifyReadyToMerge, BindingMode.TwoWay),
+                            new CheckBox().Content("is mine and changed (ready to merge, CI failing, changes requested…)")
+                                .IsChecked(vm, x => x.NotifyYourPrs, BindingMode.TwoWay),
                             new CheckBox().Content("is merged or closed")
                                 .IsChecked(vm, x => x.NotifyClosed, BindingMode.TwoWay))),
                     Section("GitHub CLI",

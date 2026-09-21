@@ -36,10 +36,10 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
             "-F", $"authoredQ={Queries.Authored(login)}",
         ], ct);
 
-        return ParseResponse(result.StdOut);
+        return ParseResponse(result.StdOut, login);
     }
 
-    internal static IReadOnlyList<PullRequest> ParseResponse(string json)
+    internal static IReadOnlyList<PullRequest> ParseResponse(string json, string viewer)
     {
         var root = JsonNode.Parse(json) ?? throw new JsonException("empty response");
         if (root["errors"] is JsonArray { Count: > 0 } errors)
@@ -52,7 +52,7 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
 
         // Authored takes precedence when a PR appears in more than one list.
         var byKey = new Dictionary<string, PullRequest>();
-        foreach (var alias in Queries.Aliases)
+        foreach (var (alias, tracksComments) in Queries.Aliases)
         {
             if (data[alias]?["nodes"] is not JsonArray nodes)
             {
@@ -66,14 +66,73 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
                     continue; // non-PR search hits have no fields
                 }
 
-                var pr = MapPullRequest(node);
+                var pr = MapPullRequest(node, viewer, tracksComments);
                 byKey[pr.Key] = pr;
             }
         }
         return [.. byKey.Values];
     }
 
-    private static PullRequest MapPullRequest(JsonNode n)
+    /// <summary>
+    /// The newest <b>unresolved</b> thing anyone said on this PR, ignoring your own. If the newest of all is
+    /// yours, nothing is reported: you were the last to speak, so there is nothing here you have not read.
+    /// <para>
+    /// Three sources, each for a reason. Issue comments can never be resolved, so they always count. Inline
+    /// conversation counts only while its thread is open — a resolved thread is a finished conversation,
+    /// whoever spoke in it last. A review's own body counts only when it is standalone commentary: a body
+    /// posted alongside inline comments is a summary of them, and they are what carries the resolution, so
+    /// counting it would keep resurrecting a discussion you have already settled.
+    /// </para>
+    /// </summary>
+    private static (DateTimeOffset At, string By)? MapLastComment(JsonNode n, string viewer)
+    {
+        List<(DateTimeOffset At, string By)> said = [];
+        void Add(JsonNode? c)
+        {
+            if (c?["createdAt"]?.GetValue<DateTimeOffset?>() is { } at
+                && c["author"]?["login"]?.GetValue<string>() is { } by)
+            {
+                said.Add((at, by));
+            }
+        }
+
+        foreach (var c in n["comments"]?["nodes"]?.AsArray() ?? [])
+        {
+            Add(c);
+        }
+
+        foreach (var thread in n["reviewThreads"]?["nodes"]?.AsArray() ?? [])
+        {
+            if (thread?["isResolved"]?.GetValue<bool>() != false)
+            {
+                continue; // resolved, or a shape we cannot read: either way, not waiting on you
+            }
+
+            foreach (var c in thread["comments"]?["nodes"]?.AsArray() ?? [])
+            {
+                Add(c);
+            }
+        }
+
+        foreach (var review in n["reviews"]?["nodes"]?.AsArray() ?? [])
+        {
+            var standalone = review?["comments"]?["totalCount"]?.GetValue<int>() == 0;
+            if (standalone && !string.IsNullOrWhiteSpace(review?["bodyText"]?.GetValue<string>()))
+            {
+                Add(review);
+            }
+        }
+
+        if (said.Count == 0)
+        {
+            return null;
+        }
+
+        var last = said.MaxBy(s => s.At);
+        return string.Equals(last.By, viewer, StringComparison.OrdinalIgnoreCase) ? null : last;
+    }
+
+    private static PullRequest MapPullRequest(JsonNode n, string viewer, bool tracksComments)
     {
         var reviewers = new List<string>();
         foreach (var r in n["reviewRequests"]?["nodes"]?.AsArray() ?? [])
@@ -106,6 +165,7 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
 
         var commit = n["commits"]?["nodes"]?.AsArray().FirstOrDefault()?["commit"];
         var rollup = commit?["statusCheckRollup"]?["state"]?.GetValue<string>();
+        var lastComment = tracksComments ? MapLastComment(n, viewer) : null;
 
         return new PullRequest(
             Repo: n["repository"]?["nameWithOwner"]?.GetValue<string>() ?? "?",
@@ -133,7 +193,9 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
                 "SUCCESS" => CheckState.Success,
                 "FAILURE" or "ERROR" => CheckState.Failure,
                 _ => CheckState.Pending, // PENDING, EXPECTED
-            });
+            },
+            LastCommentAt: lastComment?.At,
+            LastCommentBy: lastComment?.By);
     }
 
     private static TEnum ParseEnum<TEnum>(JsonNode? node, TEnum fallback) where TEnum : struct, Enum

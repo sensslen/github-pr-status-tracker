@@ -30,7 +30,7 @@ public class NotificationServiceTests
         var change = new PrChange(PrChangeKind.StatusChanged, Tracked(PrStatus.ReadyToMerge, author: Me), PrStatus.AwaitingReview);
 
         Assert.Equal("Ready to merge — PR 1", NotificationService.ToRecord(change, new AppSettings())?.Title);
-        Assert.Null(NotificationService.ToRecord(change, new AppSettings { NotifyReadyToMerge = false }));
+        Assert.Null(NotificationService.ToRecord(change, new AppSettings { NotifyYourPrs = false }));
     }
 
     [Fact]

@@ -10,13 +10,12 @@ using PrStatusTracker.Platform;
 
 namespace PrStatusTracker.ViewModels;
 
-public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
+public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred, bool hasNewComments)
 {
     public PullRequest Pr { get; } = tracked.Pr;
     public string Title { get; } = tracked.Pr.Title;
     public string Url { get; } = tracked.Pr.Url;
     public PrStatus Status { get; } = tracked.Status;
-    public string StatusLabel { get; } = tracked.Status.Label();
     public string Age { get; } = FormatAge(tracked.Pr.CreatedAt);
 
     /// <summary>Open for more than a day: the age gets emphasised so long-waiting PRs stand out.</summary>
@@ -31,6 +30,35 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 
     /// <summary>Marked by the user as one they are working through; starred rows sort to the top of their bucket.</summary>
     public bool IsStarred { get; } = isStarred;
+
+    /// <summary>Someone has said something here since you last opened it. Only ever true for your own PRs.</summary>
+    public bool HasNewComments { get; } = hasNewComments;
+
+    /// <summary>
+    /// Everything this PR is calling for, most pressing first. Empty for a PR that needs nothing from you,
+    /// and for every PR that is not yours — those are what the other two tabs are for.
+    /// </summary>
+    public IReadOnlyList<PrCallout> Callouts { get; } = tracked.Status.Callouts(hasNewComments);
+
+    /// <summary>The one the row sorts and colours by. None is the enum's default, so an empty list gives it.</summary>
+    public PrCallout Callout => Callouts.FirstOrDefault();
+
+    /// <summary>
+    /// What the pill reads. Normally the status, but a quiet status is overruled by unread comments: a PR
+    /// whose pill said "Awaiting review" while the tab counted it as wanting something was telling you two
+    /// different things at once. Where the status already carries a callout of its own, that still leads —
+    /// failing CI outranks a comment — and the 💬 marker carries the rest.
+    /// </summary>
+    public string StatusLabel { get; } = tracked.Status.Callouts(hasNewComments).FirstOrDefault() == PrCallout.NewComments
+        ? "New comments"
+        : tracked.Status.Label();
+
+    public bool NeedsAttention => Callouts.Count > 0;
+
+    /// <summary>Projected here like every other row string, so the view never reads the raw PR.</summary>
+    public string NewCommentsTip { get; } = hasNewComments
+        ? $"New comments since you last opened this — latest from {tracked.Pr.LastCommentBy}"
+        : string.Empty;
 
     private static string BuildDetails(PullRequest pr)
     {
@@ -79,14 +107,14 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 }
 
 /// <summary>One bucket's rows plus the derived bits the views bind to (tab header, empty state).</summary>
-public sealed partial class PrGroupViewModel(PrBucket bucket) : ObservableObject
+public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel filter) : ObservableObject
 {
     public PrBucket Bucket { get; } = bucket;
+
+    /// <summary>The bar above this tab's rows. Some tabs share one of these; Your PRs has its own.</summary>
+    public PrFilterViewModel Filter { get; } = filter;
     public string EmptyText { get; } = bucket.EmptyText();
     public ObservableCollection<PrItemViewModel> Items { get; } = [];
-
-    /// <summary>Ready-to-merge is a short list you act on, not one you sift; only the long buckets get the filter bar.</summary>
-    public bool Filterable { get; } = bucket != PrBucket.ReadyToMerge;
 
     /// <summary>Rows in this bucket before filtering; what the tray and summary count.</summary>
     public int TotalCount { get; private set; }
@@ -95,8 +123,20 @@ public sealed partial class PrGroupViewModel(PrBucket bucket) : ObservableObject
     [ObservableProperty] public partial string ShortHeader { get; set; } = bucket.ShortLabel();
     [ObservableProperty] public partial bool IsEmpty { get; set; } = true;
 
-    public void Replace(IReadOnlyList<PrItemViewModel> all, PrFilter filter)
+    /// <summary>
+    /// What the visible rows are calling for — `2 ready to merge · 1 CI failing`. Unlike the summary line, this
+    /// describes what you are looking at rather than the whole snapshot, since it sits directly over the rows
+    /// it is counting. Empty for the two review tabs, whose rows never carry a callout.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAttention))]
+    public partial string Attention { get; set; } = string.Empty;
+
+    public bool HasAttention => Attention.Length > 0;
+
+    public void Replace(IReadOnlyList<PrItemViewModel> all)
     {
+        var filter = Filter.Current;
         TotalCount = all.Count;
         Items.Clear();
         foreach (var item in all)
@@ -112,7 +152,16 @@ public sealed partial class PrGroupViewModel(PrBucket bucket) : ObservableObject
             ? $"{Bucket.Label()} ({Items.Count} of {TotalCount})"
             : MainViewModel.WithCount(Bucket.Label(), TotalCount);
         ShortHeader = MainViewModel.WithCount(Bucket.ShortLabel(), TotalCount);
+        // Rows on the review tabs never carry a callout, so there is nothing there to add up.
+        Attention = Bucket == PrBucket.YourPrs ? Summarise(Items) : string.Empty;
     }
+
+    /// <summary>Counts each callout a row carries, so a failing PR with unread comments is named under both.</summary>
+    internal static string Summarise(IEnumerable<PrItemViewModel> items) =>
+        string.Join(" · ", items.SelectMany(i => i.Callouts)
+            .GroupBy(c => c)
+            .OrderBy(g => g.Key)
+            .Select(g => $"{g.Count()} {g.Key.Label()}"));
 }
 
 /// <summary>What the tray icon should look like, in priority order.</summary>
@@ -120,12 +169,9 @@ public enum TrayState { Idle, Ready, NeedsYou, Error }
 
 public sealed partial class MainViewModel : ObservableObject
 {
-    public const string AnyAuthor = "Any author";
-    public const string AnyLabel = "Any label";
-    public const string AnyRepo = "Any repo";
-
     private readonly PrStore _store;
     private readonly StarStore _stars;
+    private readonly CommentSeenStore _seen;
     private readonly PollingService _poller;
     private readonly NotificationService _notifications;
     private readonly AppSettings _settings;
@@ -134,14 +180,21 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly GhCommandRunner _gh;
     private readonly PrGroupViewModel[] _groups;
     private bool _startAtLogin;
-    private bool _rebuildingOptions;
+
+    // Your PRs you could merge right now, and those wanting something first — both across the whole snapshot,
+    // filter or no filter, because the tray and the summary line speak for all of it. Fields rather than
+    // locals because RefreshTrayState is also reached from RefreshPollerState, long after the last poll.
+    private int _readyCount;
+    private int _attentionCount;
     private string? _localMessage; // shown in the banner when there is no poll error
 
-    public MainViewModel(PrStore store, StarStore stars, PollingService poller, NotificationService notifications,
-        AppSettings settings, JsonFileStore<AppSettings> settingsFile, IAutoStart autoStart, GhCommandRunner gh)
+    public MainViewModel(PrStore store, StarStore stars, CommentSeenStore seen, PollingService poller,
+        NotificationService notifications, AppSettings settings, JsonFileStore<AppSettings> settingsFile,
+        IAutoStart autoStart, GhCommandRunner gh)
     {
         _store = store;
         _stars = stars;
+        _seen = seen;
         _poller = poller;
         _notifications = notifications;
         _settings = settings;
@@ -149,10 +202,16 @@ public sealed partial class MainViewModel : ObservableObject
         _autoStart = autoStart;
         _gh = gh;
         _startAtLogin = autoStart.IsEnabled();
-        _groups = [NeedsYou, WaitingOnOthers, ReadyToMerge];
+        NeedsYou = new(PrBucket.NeedsYou, ReviewFilter);
+        WaitingOnOthers = new(PrBucket.WaitingOnOthers, ReviewFilter);
+        YourPrs = new(PrBucket.YourPrs, YourPrsFilter);
+        _groups = [NeedsYou, WaitingOnOthers, YourPrs];
 
+        ReviewFilter.Changed += RefreshGroups;
+        YourPrsFilter.Changed += RefreshGroups;
         store.Updated += () => Dispatcher.UIThread.Post(RefreshGroups);
         stars.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
+        seen.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
         poller.StateChanged += () => Dispatcher.UIThread.Post(RefreshPollerState);
         notifications.HistoryChanged += () => Dispatcher.UIThread.Post(RefreshNotifications);
 
@@ -162,9 +221,17 @@ public sealed partial class MainViewModel : ObservableObject
         ResolveGhPath();
     }
 
-    public PrGroupViewModel NeedsYou { get; } = new(PrBucket.NeedsYou);
-    public PrGroupViewModel WaitingOnOthers { get; } = new(PrBucket.WaitingOnOthers);
-    public PrGroupViewModel ReadyToMerge { get; } = new(PrBucket.ReadyToMerge);
+    /// <summary>
+    /// Other people's PRs are one population, sifted the same way whether or not you have reviewed them yet,
+    /// so those two tabs share a bar. Your own PRs are a different population — a handful, all by you — and
+    /// narrowing them has nothing to do with narrowing a review queue, so that tab keeps its own.
+    /// </summary>
+    public PrFilterViewModel ReviewFilter { get; } = new();
+    public PrFilterViewModel YourPrsFilter { get; } = new(withAuthor: false);
+
+    public PrGroupViewModel NeedsYou { get; }
+    public PrGroupViewModel WaitingOnOthers { get; }
+    public PrGroupViewModel YourPrs { get; }
     public ObservableCollection<NotificationRecord> Notifications { get; } = [];
     public static string DataDirectory => AppPaths.DataDirectory;
     public bool AutoStartSupported => _autoStart.IsSupported;
@@ -182,75 +249,6 @@ public sealed partial class MainViewModel : ObservableObject
     public partial string Banner { get; set; } = string.Empty;
 
     public bool HasBanner => Banner.Length > 0;
-
-    // --- filtering -------------------------------------------------------------------------------------------
-
-    /// <summary>Dropdown choices, rebuilt from the snapshot; the first entry is always the "any" sentinel.</summary>
-    public ObservableCollection<string> Authors { get; } = [AnyAuthor];
-    public ObservableCollection<string> Labels { get; } = [AnyLabel];
-    public ObservableCollection<string> Repos { get; } = [AnyRepo];
-
-    [ObservableProperty] public partial string FilterText { get; set; } = string.Empty;
-    [ObservableProperty] public partial string? FilterAuthor { get; set; } = AnyAuthor;
-    [ObservableProperty] public partial string? FilterLabel { get; set; } = AnyLabel;
-    [ObservableProperty] public partial string? FilterRepo { get; set; } = AnyRepo;
-    [ObservableProperty] public partial bool IsFiltering { get; set; }
-
-    public PrFilter Filter => new(
-        FilterText,
-        FilterAuthor is null or AnyAuthor ? null : FilterAuthor,
-        FilterLabel is null or AnyLabel ? null : FilterLabel,
-        FilterRepo is null or AnyRepo ? null : FilterRepo);
-
-    public void ClearFilter()
-    {
-        FilterText = string.Empty;
-        FilterAuthor = AnyAuthor;
-        FilterLabel = AnyLabel;
-        FilterRepo = AnyRepo;
-    }
-
-    partial void OnFilterTextChanged(string value) => OnFilterChanged();
-    partial void OnFilterAuthorChanged(string? value) => OnFilterChanged();
-    partial void OnFilterLabelChanged(string? value) => OnFilterChanged();
-    partial void OnFilterRepoChanged(string? value) => OnFilterChanged();
-
-    private void OnFilterChanged()
-    {
-        if (_rebuildingOptions)
-        {
-            return; // a ComboBox resetting while its items change is not a user choice
-        }
-
-        RefreshGroups();
-    }
-
-    /// <summary>Keep each dropdown's choices in step with the snapshot without disturbing a still-valid selection.</summary>
-    private void RebuildOptions(IReadOnlyList<PrItemViewModel> items)
-    {
-        _rebuildingOptions = true;
-        try
-        {
-            FilterAuthor = Sync(Authors, AnyAuthor, items.Select(i => i.Pr.Author), FilterAuthor);
-            FilterLabel = Sync(Labels, AnyLabel, items.SelectMany(i => i.Pr.Labels), FilterLabel);
-            FilterRepo = Sync(Repos, AnyRepo, items.Select(i => i.Pr.Repo), FilterRepo);
-        }
-        finally { _rebuildingOptions = false; }
-    }
-
-    private static string Sync(ObservableCollection<string> target, string any, IEnumerable<string> values, string? current)
-    {
-        var wanted = values.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).Prepend(any).ToList();
-        if (!wanted.SequenceEqual(target))
-        {
-            target.Clear();
-            foreach (var v in wanted)
-            {
-                target.Add(v);
-            }
-        }
-        return current is not null && wanted.Contains(current) ? current : any;
-    }
 
     // --- settings: the view model is a thin pass-through over AppSettings ------------------------------------
 
@@ -272,10 +270,10 @@ public sealed partial class MainViewModel : ObservableObject
         set => SetSetting(_settings.NotifyWaitingOnOthers, value, (s, v) => s.NotifyWaitingOnOthers = v);
     }
 
-    public bool NotifyReadyToMerge
+    public bool NotifyYourPrs
     {
-        get => _settings.NotifyReadyToMerge;
-        set => SetSetting(_settings.NotifyReadyToMerge, value, (s, v) => s.NotifyReadyToMerge = v);
+        get => _settings.NotifyYourPrs;
+        set => SetSetting(_settings.NotifyYourPrs, value, (s, v) => s.NotifyYourPrs = v);
     }
 
     public bool NotifyClosed
@@ -329,7 +327,13 @@ public sealed partial class MainViewModel : ObservableObject
     // --- actions -------------------------------------------------------------------------------------------
 
     public Task RefreshAsync() => _poller.RefreshNowAsync();
-    public static void OpenPr(PrItemViewModel item) => Browser.Open(item.Url);
+
+    /// <summary>Opening a PR is what counts as reading it: its comments stop being new from here on.</summary>
+    public void OpenPr(PrItemViewModel item)
+    {
+        _seen.MarkRead(item.Pr.Key, item.Pr.LastCommentAt);
+        Browser.Open(item.Url);
+    }
 
     /// <summary>The store raises its own change event, which re-sorts and rebuilds the rows.</summary>
     public void ToggleStar(PrItemViewModel item) => _stars.Toggle(item.Pr.Key);
@@ -358,33 +362,47 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void RefreshGroups()
     {
-        // Starred first — those are the ones being worked on right now — then oldest PR first regardless of
-        // status, so the ones that have waited longest come to the top.
+        // Starred first — those are the ones being worked on right now — then anything calling for attention,
+        // most pressing callout first, then oldest PR first, so the ones that have waited longest come to the
+        // top. Only your own PRs carry callouts, so for the two review tabs this is the old star/age order.
         var items = _store.Current
-            .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key)))
+            .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key), _seen.HasUnread(t.Key, t.Pr.LastCommentAt)))
             .OrderByDescending(i => i.IsStarred)
+            .ThenByDescending(i => i.NeedsAttention)
+            .ThenBy(i => i.Callout)
             .ThenBy(i => i.Pr.CreatedAt)
             .ToList();
-        RebuildOptions(items);
-
-        var filter = Filter;
-        IsFiltering = filter.IsActive;
+        // Each bar offers choices drawn from the rows it filters, so the Your PRs repo dropdown lists the
+        // repos you have PRs in rather than every repo you have ever been asked to review.
+        var byBucket = items.ToLookup(i => i.Status.Bucket());
+        ReviewFilter.RebuildOptions(byBucket[PrBucket.NeedsYou].Concat(byBucket[PrBucket.WaitingOnOthers]));
+        YourPrsFilter.RebuildOptions(byBucket[PrBucket.YourPrs]);
         foreach (var group in _groups)
         {
-            group.Replace([.. items.Where(i => i.Status.Bucket() == group.Bucket)], group.Filterable ? filter : PrFilter.None);
+            group.Replace([.. byBucket[group.Bucket]]);
         }
 
-        // A conflicted PR is still counted as ready — it is one rebase from mergeable — but the count has to say
-        // so, or the summary and the tray tooltip promise something to merge that will not merge.
-        var conflicted = items.Count(i => i.Status == PrStatus.ReadyToMergeConflict);
-        var ready = conflicted == 0
-            ? $"{ReadyToMerge.TotalCount} ready to merge"
-            : $"{ReadyToMerge.TotalCount} ready to merge ({conflicted} conflicted)";
+        // Summary and tray always describe everything, whatever the window is narrowed to. Your own PRs are one
+        // tab now, so the count that mattered — how many of them want something — has to be spelled out here
+        // rather than read off the tab sizes.
+        _readyCount = items.Count(i => i.Callout == PrCallout.ReadyToMerge);
+        _attentionCount = items.Count(i => i.Callout.IsWork());
+        var parts = new List<string>();
+        if (_readyCount > 0)
+        {
+            parts.Add($"{_readyCount} ready");
+        }
 
-        // Summary and tray always describe everything, whatever the window is narrowed to.
+        if (_attentionCount > 0)
+        {
+            parts.Add($"{_attentionCount} need attention");
+        }
+
+        var detail = parts.Count == 0 ? string.Empty : $" ({string.Join(" · ", parts)})";
+
         Summary = items.Count == 0
             ? "No open pull requests"
-            : $"{NeedsYou.TotalCount} need you · {WaitingOnOthers.TotalCount} waiting · {ready}";
+            : $"{NeedsYou.TotalCount} need you · {WaitingOnOthers.TotalCount} waiting · {YourPrs.TotalCount} yours{detail}";
         RefreshTrayState();
     }
 
@@ -396,10 +414,14 @@ public sealed partial class MainViewModel : ObservableObject
         RefreshTrayState();
     }
 
+    /// <summary>
+    /// Driven by callouts rather than tab sizes: a tab full of your own drafts is not a reason to light the
+    /// tray up, and a PR of yours with failing checks is — exactly as it was when it lived under "needs you".
+    /// </summary>
     private void RefreshTrayState() =>
         TrayState = _poller.LastError is not null ? TrayState.Error
-            : NeedsYou.TotalCount > 0 ? TrayState.NeedsYou
-            : ReadyToMerge.TotalCount > 0 ? TrayState.Ready
+            : NeedsYou.TotalCount > 0 || _attentionCount > 0 ? TrayState.NeedsYou
+            : _readyCount > 0 ? TrayState.Ready
             : TrayState.Idle;
 
     private void RefreshNotifications()

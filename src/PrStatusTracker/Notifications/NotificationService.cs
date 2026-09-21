@@ -116,9 +116,9 @@ public sealed class NotificationService : IDisposable
             PrChangeKind.Disappeared => settings.NotifyClosed ? "No longer on your list" : null,
             // Your own action (approving, commenting) is not news to you, and a draft never needs anyone yet.
             _ when status.IsSelfInflicted() || status.IsDraft() => null,
-            // A PR showing up is only news if it already needs you: your own new PR is usually you opening
-            // it, and a draft you're requested on will announce itself when it's marked ready.
-            PrChangeKind.Appeared when status.Bucket() != PrBucket.NeedsYou => null,
+            // A PR showing up is only news if something is already being asked of it: your own new PR is
+            // usually you opening it, and a draft you're requested on will announce itself when it's marked ready.
+            PrChangeKind.Appeared when !status.IsAskingSomething() => null,
             _ => wanted ? status.Label() : null,
         };
         if (what is null)
@@ -155,7 +155,7 @@ public sealed class NotificationService : IDisposable
     {
         PrBucket.NeedsYou => s.NotifyNeedsYou,
         PrBucket.WaitingOnOthers => s.NotifyWaitingOnOthers,
-        PrBucket.ReadyToMerge => s.NotifyReadyToMerge,
+        PrBucket.YourPrs => s.NotifyYourPrs,
         _ => true,
     };
 

@@ -54,7 +54,12 @@
           "mergeable": "MERGEABLE",
           "reviewRequests": { "nodes": [] },
           "latestReviews": { "nodes": [ { "author": { "login": "bob" }, "state": "APPROVED", "submittedAt": "2026-09-15T09:30:00Z" } ] },
-          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-15T08:00:00Z", "statusCheckRollup": { "state": "SUCCESS" } } } ] }
+          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-15T08:00:00Z", "statusCheckRollup": { "state": "SUCCESS" } } } ] },
+          "comments": { "nodes": [ { "author": { "login": "bob" }, "createdAt": "2026-09-15T09:45:00Z" } ] },
+          "reviewThreads": { "nodes": [
+            { "isResolved": false, "comments": { "nodes": [ { "author": { "login": "carol" }, "createdAt": "2026-09-15T09:30:00Z" } ] } } ] },
+          "reviews": { "nodes": [
+            { "author": { "login": "carol" }, "createdAt": "2026-09-15T09:30:00Z", "bodyText": "", "comments": { "totalCount": 1 } } ] }
         },
         {
           "number": 42,
@@ -67,8 +72,13 @@
           "reviewDecision": null,
           "mergeable": "CONFLICTING",
           "reviewRequests": { "nodes": [] },
-          "latestReviews": { "nodes": [] },
-          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] }
+          "latestReviews": { "nodes": [ { "author": { "login": "owen" }, "state": "COMMENTED", "submittedAt": "2026-09-10T07:00:00Z" } ] },
+          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] },
+          "comments": { "nodes": [ { "author": { "login": "dave" }, "createdAt": "2026-09-09T08:00:00Z" } ] },
+          "reviewThreads": { "nodes": [
+            { "isResolved": false, "comments": { "nodes": [ { "author": { "login": "owen" }, "createdAt": "2026-09-10T07:00:00Z" } ] } } ] },
+          "reviews": { "nodes": [
+            { "author": { "login": "owen" }, "createdAt": "2026-09-10T07:00:00Z", "bodyText": "", "comments": { "totalCount": 1 } } ] }
         }
       ]
     }

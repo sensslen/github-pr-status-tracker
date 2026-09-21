@@ -57,6 +57,7 @@ src/PrStatusTracker/
     PrFilter.cs               // main-window filter rules (text + author/label/repo)
     PrStore.cs                // snapshot + diffing
     StarStore.cs              // the PRs you starred, persisted
+    CommentSeenStore.cs       // how far you have read each of your own PRs, persisted
     PollingService.cs
     JsonFileStore.cs          // load/save for settings, snapshot, notifications
   Notifications/
@@ -75,6 +76,7 @@ src/PrStatusTracker/
     CompactWindow.cs          // the tray popup
     TrayIconHost.cs           // tooltip, icon variant, menu
   ViewModels/
+    PrFilterViewModel.cs      // one filter bar's state; a tab owns or shares one
     MainViewModel.cs
 tests/PrStatusTracker.Tests/
   StatusEvaluatorTests.cs     // the rules tables, case by case
@@ -115,7 +117,7 @@ since GraphQL search does not accept `@me`.
 query($reviewQ: String!, $reviewedQ: String!, $authoredQ: String!) {
   review:   search(query: $reviewQ,   type: ISSUE, first: 50) { nodes { ...PrFields } }
   reviewed: search(query: $reviewedQ, type: ISSUE, first: 50) { nodes { ...PrFields } }
-  authored: search(query: $authoredQ, type: ISSUE, first: 50) { nodes { ...PrFields } }
+  authored: search(query: $authoredQ, type: ISSUE, first: 50) { nodes { ...PrFields ...CommentFields } }
 }
 
 fragment PrFields on PullRequest {
@@ -135,6 +137,15 @@ fragment PrFields on PullRequest {
     statusCheckRollup { state } # SUCCESS | FAILURE | PENDING | ERROR | EXPECTED
   } } }
 }
+
+fragment CommentFields on PullRequest {
+  comments(last: 1) { nodes { author { login } createdAt } }
+  reviewThreads(last: 20) { nodes {
+    isResolved
+    comments(last: 1) { nodes { author { login } createdAt } }
+  } }
+  reviews(last: 5) { nodes { author { login } createdAt bodyText comments { totalCount } } }
+}
 ```
 
 with
@@ -145,6 +156,30 @@ with
 
 `reviewed-by:` is there because GitHub removes a PR from `review-requested:` the moment you
 submit a review; without it, approving a PR would look like the PR closing.
+
+`CommentFields` is asked for on the authored search alone: only your own PRs track comments as
+read or unread (section 6), so paying for these three times over would fill a column nothing
+reads. Which searches carry it is declared beside the query, on `Queries.Aliases`, and handed to
+the parser — rather than inferred from which fields happened to come back, which would have made
+adding the fragment to a second search change behaviour in three components with nothing failing.
+
+`LastCommentAt` / `LastCommentBy` are the newest **unresolved** thing anyone said, across three sources,
+each included for its own reason:
+
+| Source | Counts when | Why |
+|---|---|---|
+| `comments(last: 1)` | always | an issue comment cannot be resolved, so it is outstanding until read |
+| `reviewThreads(last: 20)` | the thread is **open** | a resolved thread is a finished conversation, whoever spoke in it last |
+| `reviews(last: 5)` | the review has a body **and no inline comments** | standalone commentary has no thread to resolve; a body posted *alongside* inline comments is a summary of them, and they carry the resolution |
+
+If the newest of the three is yours, nothing is reported: you were the last to speak, so there is
+nothing here you have not read. That works whichever source carries your reply.
+
+Threads are why this does not reuse `latestReviews`, which is already fetched and would be free.
+Only a thread carries `isResolved`; `latestReviews` would drag every resolved thread's last reply
+back in. This was the bug that prompted the rule — a PR of the user's had all four of its threads
+resolved, and the reviews that had carried them were recent enough that the tab claimed the PR
+wanted something while its pill read *Awaiting review*.
 
 One call per poll keeps us well inside the GraphQL rate limit even at a one-minute
 interval.
@@ -164,6 +199,37 @@ no `gh` round trip. Future write actions (approve, comment) would go through `gh
 Each PR is reduced to one `PrStatus`, always expressed *relative to the current user*, and
 each status belongs to a bucket that drives grouping and colour in the UI.
 
+The bucket split is simply **whether you wrote it**. Everything you authored lives together in
+*Your PRs*, whatever state it is in; the other two tabs are other people's PRs, before and
+after you have reviewed them. A PR belongs to exactly one bucket, so the tab counts sum to the
+total and the tray never counts anything twice.
+
+That partition is stated once, as the Your PRs arm of `Bucket`, with `IsAuthored` derived from it;
+a test pins it to `StatusEvaluator` — whatever the evaluator returns for a PR of yours must read as
+authored, and nothing it returns for anyone else's may. Both sides are listed positively, so a
+status added to the enum and forgotten falls through to **Needs you**, where it is visible, rather
+than landing silently in your tab, your tray and your toast preference.
+
+Two further predicates live beside the enum, because the same distinctions were otherwise spelled
+out as raw comparisons at three call sites in two projects:
+
+| Predicate | Means | Read by |
+|---|---|---|
+| `PrCallout.IsWork()` | every callout but *ready to merge* — something to do, not something to enjoy | the summary's *need attention* count, the tray's orange icon |
+| `PrStatus.IsAskingSomething()` | in **Needs you**, or one of yours with any callout | the notifier, deciding whether a PR turning up is news |
+
+They differ deliberately: a PR that is simply ready to merge *is* news worth a toast, but is not
+work, so it earns the green tray icon rather than the orange one.
+
+```mermaid
+flowchart LR
+    S["PrStatus"] --> A{"authored<br/>status?"}
+    A -->|yes| Y["Your PRs"]
+    A -->|no| R{"have you<br/>acted?"}
+    R -->|not yet| N["Needs you"]
+    R -->|reviewed| W["Waiting on others"]
+```
+
 ### PRs where you are a requested reviewer
 
 | Condition | Status | Bucket |
@@ -179,54 +245,63 @@ each status belongs to a bucket that drives grouping and colour in the UI.
 
 ### PRs you authored
 
-| Condition (first match wins) | Status | Bucket |
+All of these are **Your PRs**. What separates them there is the *callout* — what the PR is
+asking of you — which is what the tab sorts by, colours its status pill by, and counts in the
+strip above the rows.
+
+| Condition (first match wins) | Status | Callout |
 |---|---|---|
-| Draft | `Draft` | Waiting on others |
-| `mergeable == CONFLICTING`, approved and checks green | `ReadyToMergeConflict` | **Ready to merge** |
-| `mergeable == CONFLICTING` | `MergeConflict` | **Needs you** |
-| Checks rollup is `FAILURE` or `ERROR` | `ChecksFailing` | **Needs you** |
-| `reviewDecision == CHANGES_REQUESTED` | `ChangesRequested` | **Needs you** |
+| Draft | `Draft` | — |
+| `mergeable == CONFLICTING`, approved and checks green | `ReadyToMergeConflict` | **Conflicted** |
+| `mergeable == CONFLICTING` | `MergeConflict` | **Conflicted** |
+| Checks rollup is `FAILURE` or `ERROR` | `ChecksFailing` | **CI failing** |
+| `reviewDecision == CHANGES_REQUESTED` | `ChangesRequested` | **Changes requested** |
 | `reviewDecision == APPROVED`, checks green | `ReadyToMerge` | **Ready to merge** |
-| `reviewDecision == APPROVED`, checks pending | `ApprovedChecksPending` | Waiting on others |
-| Reviewers requested, or anyone has reviewed, but no decision yet | `AwaitingReview` | Waiting on others |
-| Nobody requested and nobody has reviewed | `NoReviewers` | **Needs you** |
+| `reviewDecision == APPROVED`, checks pending | `ApprovedChecksPending` | — |
+| Reviewers requested, or anyone has reviewed, but no decision yet | `AwaitingReview` | — |
+| Nobody requested and nobody has reviewed | `NoReviewers` | **No reviewers** |
 
 A PR that appears in both lists (you authored it *and* were asked to review it) is shown
 once, under the authored rules.
 
-A conflict normally means the PR is back on you, so `MergeConflict` sits in **Needs you**.
-The exception is a PR that is signed off and green, where the conflict is the only thing
-left between it and the merge button: `ReadyToMergeConflict` keeps it in **Ready to merge**,
-beside the PRs it will be merged alongside, rather than burying it among work that still
-needs reviewing. Because it is the one row in that tab you cannot actually merge, its pill
-reads *Approved, merge conflict* and is coloured **Needs you** orange instead of ready
-green, and the compact popup — which has no room for a pill — marks the row with a ⚠.
-Approved but still waiting on checks stays `MergeConflict`: it is not ready either way.
+There is a sixth callout, **new comments**, which no status can produce: it depends on what you
+have already read, which the status knows nothing about. It is computed from `LastCommentAt`
+against `CommentSeenStore` and is the one callout a PR can carry *alongside* another, so a PR
+with failing checks and an unanswered question is counted under both in the strip. The status's
+own callout leads: broken CI outranks a comment.
 
-Two consequences of putting this in the status rather than in a display flag, both intended.
-It counts towards *ready to merge* in the summary line and the tray — it is one rebase from
-mergeable, not a different kind of work — so the summary spells the blocked ones out rather
-than hiding them: `0 need you · 0 waiting · 1 ready to merge (1 conflicted)`. The tray tooltip
-is that same string, which is what stops the tray's ready icon from promising a merge that
-cannot happen. And because toasts are gated per bucket, a PR that develops a conflict while
-signed off toasts under the *Ready to merge* preference rather than *Needs you*.
+`PrCallout` is declared in the order the tab sorts by — `ReadyToMerge`, `ChecksFailing`,
+`MergeConflict`, `ChangesRequested`, `NewComments`, `NoReviewers` — so the merge button comes
+first and the things standing between you and it follow.
+
+A conflicted PR is never *ready*, approved and green or not: the merge button will not work
+until it has been rebased, so `ReadyToMergeConflict` is called out as the conflict it is and
+does not count towards the ready tally in the summary line or the tray. (It keeps its own status
+rather than collapsing into `MergeConflict` because the pill still has to say *Approved, merge
+conflict* — a rebase is all that is left, not another round of review.)
 
 `NewCommitsSinceYourReview` compares your latest review's `submittedAt` against the head
 commit's `committedDate` (GitHub no longer populates `pushedDate`). That comparison is what moves a PR back into **Needs you** when new
 commits land, instead of leaving it stale at "you approved" — and tells you only the delta
 needs a look. Within *Needs you* the status pill therefore answers *why* the PR needs you
-(first look, team request, re-request, new commits; or for your own PRs: conflict, failing
-checks, changes requested, no reviewers) rather than restating the bucket.
+(first look, team request, re-request, new commits) rather than restating the bucket.
 
-The three buckets — **Needs you**, **Waiting on others**, **Ready to merge** — are the
-whole product in one line: the tray tooltip is just their counts.
+The three buckets — **Needs you**, **Waiting on others**, **Your PRs** — are the whole product
+in one line: the tray tooltip is their counts, plus how many of your own are ready or want
+something.
 
 ---
 
 ## 5. Change detection & notifications
 
-`PrStore` holds the current snapshot keyed by `repo#number`. After each poll it diffs the
-new snapshot against the previous one and emits a change for:
+`PrStore` holds the current snapshot keyed by `repo#number`. Its constructor restores the snapshot
+from disk silently — nobody is subscribed yet — so `App` calls `Start()` once, after everything is
+wired, to announce it. Without that each consumer has to prime itself, which turns correctness into
+an undeclared contract about the order subscriptions were attached: the annotation stores must be
+seeded before the lists are built off them, or the first paint shows no 💬 and no event ever
+arrives to correct it.
+
+After each poll it diffs the new snapshot against the previous one and emits a change for:
 
 - a PR **appearing** in either list (new review request, new PR of yours),
 - a PR's **status changing** (`AwaitingReview` to `ChangesRequested`, `ChecksFailing` to
@@ -239,9 +314,21 @@ Rules that keep the noise down:
 
 - The **first poll after launch is silent**. It seeds from the snapshot on disk, and only
   differences against that persisted snapshot notify.
+- A poll that changed nothing is dropped before it reaches disk or the UI. What counts as changed
+  is `PullRequest.SameStateAs`, which lives on the model rather than in the store: record equality
+  cannot serve, because the three list members are rebuilt from JSON every poll and compare by
+  reference. The rule for extending it is documented there — *a field the UI reads that GitHub can
+  change without stamping `updatedAt` must be named in it*. Checks, mergeability and comment
+  activity are all such fields; comment activity was added when the 💬 marker turned out to wait
+  for an unrelated change before appearing.
 - Only transitions *into* a notable status notify. Repeated polls with an unchanged status
   are silent. Statuses you caused yourself (`YouApproved`, `YouRequestedChanges`,
   `YouCommented`) and drafts you are requested on never toast.
+- A PR **appearing** only toasts if something is already being asked of it — it is in **Needs
+  you**, or it is one of yours carrying a callout. Your own new PR is usually just you opening
+  it.
+- **New comments do not toast.** They are a callout in the UI only; nothing about comment
+  activity reaches `PrStore`'s diff, so it cannot move a PR's status or raise a notification.
 - **One toast per poll.** Every change is recorded individually in history, but if a poll
   yields several, they are composed into a single toast — `N pull request updates` with up
   to four titles and `…and K more` — that opens GitHub's PR list. A lone change toasts as
@@ -277,6 +364,7 @@ Four JSON files under the platform app-data directory
 | `notifications.json` | rolling history, capped at 200: `Title`, `Body`, `Url`, `Timestamp`, `Dismissed` |
 | `snapshot.json` | last PR snapshot, so a restart does not re-notify everything |
 | `stars.json` | keys (`repo#number`) of the PRs you starred; pruned to the live snapshot |
+| `comments-seen.json` | `repo#number` to the newest comment you had read when you last opened it; pruned to the live snapshot |
 
 Writes are atomic (write to `.tmp`, then replace). A corrupt file is renamed aside and
 recreated from defaults rather than crashing the app.
@@ -291,50 +379,84 @@ tree; no XAML and no `.axaml` files in the project.
 **Tray icon** — Avalonia's built-in `TrayIcon`:
 
 - `ToolTipText` is rewritten after every poll with the summary line
-  (`3 need you · 2 waiting · 1 ready to merge`). That is the hover behaviour.
+  (`3 need you · 2 waiting · 7 yours (1 ready · 2 need attention)`). That is the hover
+  behaviour. The parenthetical is dropped when neither count is above zero.
 - `Clicked` (left-click) toggles the **compact popup**. Avalonia's `TrayIcon` has no
   right-click event — right-click is reserved for the native menu — so the popup lives on
   left-click rather than right-click.
 - Right-click menu: *Open main window*, *Refresh now*, *Open GitHub pull requests*, *Quit*.
 - Four icon variants, drawn to be distinguishable at 16 px: grey ring (idle), orange with
-  `!` (needs you), green with a check (ready to merge), red with `×` (error).
+  `!` (needs you), green with a check (ready to merge), red with `×` (error). Which one shows
+  is driven by callouts rather than tab sizes: a tab full of your own drafts is not a reason to
+  light the tray up, and a PR of yours with failing checks is.
 
 **Compact popup** (`CompactWindow`) — fixed 380×440, no window chrome, not resizable or
 movable, pinned to the tray corner (bottom-right on Windows, top-right on macOS), hides
 when it loses focus. A **segmented control** at the top switches between the three buckets
-(`Needs you (13) · Waiting (5) · Ready (2)`; a segmented control rather than a dropdown so
+(`Needs you (13) · Waiting (5) · Yours (7)`; a segmented control rather than a dropdown so
 the counts are visible and switching is one click), with the selected bucket's rows below
-as single-line `[CI badge] [★ if starred] [⚠ if conflicted] title … age` entries, and *Open main window* / *Refresh* at the
+as single-line `[CI badge] [★ if starred] [⚠ if conflicted] [💬 if unread] title … age` entries, and *Open main window* / *Refresh* at the
 bottom. The popup is never filtered — it shows the same unfiltered set the tray counts.
 
 **Main window** — one window, a filter bar, and one tab per bucket plus two more.
 
-The **filter bar** appears at the top of the *Needs you* and *Waiting on others* tabs —
-the two that get long enough to need sifting; *Ready to merge* always shows everything.
-Both tabs share one filter state: a free-text box (matches title, repo, author, labels and
-`#number`, case-insensitively) and *Any author* / *Any label* / *Any repo* dropdowns whose
-choices are rebuilt from the current snapshot on every poll (a still-valid selection
-survives the rebuild). While a filter is active the tab headers read `Needs you (3 of 13)`
-and a *Clear* button appears. The filter is view-only: the summary line, tray icon and
-toasts always describe the unfiltered set. The rules live in `Core/PrFilter.cs` so they are
-unit-tested without any UI.
+The **filter bar** appears at the top of every PR tab: a free-text box (matches title, repo,
+author, labels and `#number`, case-insensitively) and *Any author* / *Any label* / *Any repo*
+dropdowns whose choices are rebuilt on every poll (a still-valid selection survives the rebuild).
+While a bar is active the tab header reads `Needs you (3 of 13)` and a *Clear* button appears.
+Filtering is view-only: the summary line, tray icon and toasts always describe the unfiltered set.
+The matching rules live in `Core/PrFilter.cs` and the bar's state in `PrFilterViewModel`, so both
+are unit-tested without any UI.
+
+There are **two** bars, not one. *Needs you* and *Waiting on others* share theirs — they are one
+population, other people's PRs, sifted the same way whether or not you have reviewed them yet, and
+narrowing to a repo is usually meant for both. *Your PRs* owns a separate bar: a handful of PRs,
+all written by you, where narrowing has nothing to do with narrowing a review queue. Each bar's
+dropdowns are built from the rows it filters, so the Your PRs repo list offers the repos you have
+PRs in rather than every repo you have ever been asked to review.
+
+*Your PRs* also has no **author** dropdown — every PR there is yours, so it would offer one
+choice. With a bar of its own that is all it takes: the dimension is simply never set, rather than
+set-but-hidden. (The free-text box still matches author on every tab, which is why its placeholder
+is unchanged; only the dropdown goes.)
 
 Tabs:
 
-1. **Needs you / Waiting on others / Ready to merge** — tab headers carry the count.
-   Every PR list is sorted **oldest PR first** (by `createdAt`), regardless of status.
-   Starred PRs sort **above** that, at the top of their bucket — they are the ones being
-   worked on right now.
+1. **Needs you / Waiting on others / Your PRs** — tab headers carry the count.
+   Every PR list is sorted **oldest PR first** (by `createdAt`). Above that sit rows carrying a
+   callout, most pressing callout first, and above *those* the starred PRs — the ones being
+   worked on right now. Only your own PRs carry callouts, so the two review tabs keep the plain
+   starred-then-oldest order they always had.
    Rows are two dense lines and the whole row is a button that opens the PR:
-   `[star] [CI badge] [status pill] Title … age` (the age turns bold, orange and gets an ⏳ once the
-   PR has been open for more than 24 hours; the status pill takes its bucket's colour, except
-   for `ReadyToMergeConflict`, which is orange so it stands out among the ready PRs) over
+   `[star] [CI badge] [status pill] [💬 if unread] Title … age` (the age turns bold, orange and gets an ⏳ once the
+   PR has been open for more than 24 hours) over
    `repo#number · author · +adds −dels · ✓ approvals · ✗ changes · N awaiting · 🏷 labels · updated 2h ago`.
+   The status pill takes its **callout's** colour — green only when the merge button will
+   actually work, red when something is broken, orange when someone is waiting on you — so on
+   the Your PRs tab it answers what the PR wants rather than restating which tab you are on.
+   Rows with no callout fall back to their bucket's colour.
    The CI badge is text first (`✓ CI` passing, `✗ CI` failing, `… CI` running, `– CI` none)
    with colour as a secondary cue, so it reads without colour vision — the same reason the
    tray icons carry glyphs rather than relying on colour alone. The leading **star** toggles
    whether the PR is starred (☆ dim, ★ gold); it is a nested button, so its click is marked
    handled and does not open the PR.
+
+   Directly under the filter bar, a tab with callouts gets an **attention strip**:
+   `2 ready to merge · 1 CI failing · 1 with new comments`. Unlike the summary line it counts
+   what is *visible*, since it sits directly over the rows it describes; it collapses to nothing
+   on the two review tabs.
+
+   The **💬 marker** flags unresolved comments left since you last opened the PR, and appears only where the
+   pill is not already saying so — a quiet status is overruled, so a PR with nothing else outstanding reads
+   *New comments* on the pill itself rather than claiming to be merely *Awaiting review* while the strip
+   counts it as wanting something. Where the status carries a callout of its own, that leads and the marker
+   carries the rest. The compact popup has no pill, so there the marker is the only place comments can show. `CommentSeenStore` holds
+   one timestamp per PR, and opening the PR from any tab marks it read. A PR the store has never
+   heard of reads as *quiet* — `HasUnread` says so itself, rather than depending on a seeding pass
+   having run first — so a fresh install does not announce a backlog you read on GitHub months
+   ago. `Sync` still records where each newly seen PR starts, which is what lets comments arriving
+   *after* that poll register as new; it also prunes PRs that have left the snapshot, the same job
+   `StarStore.Retain` does for stars.
 2. **Notifications (n)** — the persisted history, newest first, unread count in the header;
    each title is `<what happened> — <PR title>`. *Dismiss* per row, *Dismiss all*, and a
    *Show dismissed* toggle. Clicking a row opens the PR.
@@ -411,3 +533,15 @@ been run on a Mac.
 - **Snapshot age on the tray.** `PrItemViewModel.Age` is computed when the snapshot is
   applied, so it goes stale between polls; fine at a 2-minute interval, worth a timer if
   the interval is raised.
+- ~~**Comment activity beyond `comments` and `reviews`.**~~ Confirmed against a live PR: a bare
+  reply inside an existing inline thread is recorded as a `COMMENTED` review, so it moves the
+  `reviews` connection and the 💬 marker sees it. `reviewThreads` — which would have cost
+  roughly a thousand extra nodes per poll — is not needed. Note the trap found while confirming
+  this: `reviews` and `latestReviews` are *not* interchangeable (see section 3).
+- **Bot comments count as comments.** `github-actions`, `coderabbitai` and friends are authors
+  like any other, so their output lights the 💬 marker. Resolving their threads now settles them,
+  which takes most of the sting out; whether bots want filtering outright is a judgement to make
+  after living with it.
+- **20 threads per PR, 5 reviews.** Both are `last:`, so a PR with more open threads than that
+  could hide an old unresolved one behind newer resolved ones. Only the newest matters for the
+  marker, so this shows up as a missed 💬 on a very long-running PR, not a wrong one.

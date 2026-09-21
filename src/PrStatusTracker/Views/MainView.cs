@@ -34,7 +34,7 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
                 {
                     BucketTab(vm, vm.NeedsYou),
                     BucketTab(vm, vm.WaitingOnOthers),
-                    BucketTab(vm, vm.ReadyToMerge),
+                    BucketTab(vm, vm.YourPrs),
                     new TabItem { Content = NotificationsView.Build(vm) }.Header(vm, x => x.NotificationsHeader),
                     new TabItem { Header = "Settings", Content = SettingsView.Build(vm) },
                 }
@@ -54,25 +54,35 @@ internal static class ViewHelpers
     public static readonly IBrush PendingBrush = new ImmutableSolidColorBrush(Color.Parse("#D4A72C"));
     public static readonly IBrush NeutralBrush = new ImmutableSolidColorBrush(Color.Parse("#6E7681"));
     public static readonly IBrush StarBrush = new ImmutableSolidColorBrush(Color.Parse("#E3B341"));
+    public static readonly IBrush AccentBrush = new ImmutableSolidColorBrush(Color.Parse("#0969DA"));
     public static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#14808080"));
     public static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
     public static FuncDataTemplate<T> Template<T>(Func<T, Control> build) => new((item, _) => build(item), supportsRecycling: false);
 
+    /// <summary>Bucket chrome — the popup's segmented control. Your PRs hold every state at once, so the tab
+    /// itself gets a neutral accent and the rows inside it carry the colour.</summary>
     public static IBrush BucketBrush(PrBucket bucket) => bucket switch
     {
         PrBucket.NeedsYou => NeedsYouBrush,
-        PrBucket.ReadyToMerge => ReadyBrush,
+        PrBucket.YourPrs => AccentBrush,
         _ => NeutralBrush,
     };
 
     /// <summary>
-    /// Colour for a row's status pill: its bucket's colour, except where a status has to stand out from the rest
-    /// of its bucket — a conflict sits among the ready PRs but is the one you cannot merge, so it must not read as
-    /// green. Bucket chrome (the popup's segmented control) uses <see cref="BucketBrush"/> instead.
+    /// Colour for a row's status pill. Within Your PRs the pill is the callout, so it answers what the PR wants
+    /// rather than restating which tab you are on: green only when the merge button will actually work, red when
+    /// something is broken, orange when someone is waiting on you, accent when the only thing outstanding is a
+    /// conversation. Rows on the two review tabs carry no callout and fall back to their bucket's colour.
     /// </summary>
-    public static IBrush PillBrush(PrStatus status) =>
-        status == PrStatus.ReadyToMergeConflict ? NeedsYouBrush : BucketBrush(status.Bucket());
+    public static IBrush PillBrush(PrItemViewModel item) => item.Callout switch
+    {
+        PrCallout.ReadyToMerge => ReadyBrush,
+        PrCallout.ChecksFailing or PrCallout.MergeConflict => FailBrush,
+        PrCallout.ChangesRequested or PrCallout.NoReviewers => NeedsYouBrush,
+        PrCallout.NewComments => AccentBrush,
+        _ => BucketBrush(item.Status.Bucket()),
+    };
 
     /// <summary>
     /// A one-glyph flag for rows too narrow to spell anything out. Always built, and collapsed out of the layout
@@ -91,13 +101,21 @@ internal static class ViewHelpers
         return label;
     }
 
-    /// <summary>Flags a conflict on rows too narrow for a status pill.</summary>
+    /// <summary>Flags a conflict on rows too narrow for a status pill. Red, to match the pill it stands in for.</summary>
     public static TextBlock ConflictMarker(PrItemViewModel item) =>
-        Marker("⚠", NeedsYouBrush, "Merge conflict", item.HasConflict);
+        Marker("⚠", FailBrush, "Merge conflict", item.HasConflict);
 
     /// <summary>Read-only star for rows too dense to toggle on, such as the compact popup's.</summary>
     public static TextBlock StarMarker(PrItemViewModel item) =>
         Marker("★", StarBrush, "Starred", item.IsStarred);
+
+    /// <summary>
+    /// Flags unresolved comments left since you last opened the PR; clicking the row clears it. Whether it is
+    /// wanted is the caller's to say, because a row whose pill already reads "New comments" does not need the
+    /// same thing said twice — a row with no pill at all does.
+    /// </summary>
+    public static TextBlock CommentMarker(PrItemViewModel item, bool visible) =>
+        Marker("💬", AccentBrush, item.NewCommentsTip, visible);
 
     /// <summary>
     /// The star toggle on a main-window row. Filled and gold when starred, a dim outline otherwise — always

@@ -23,6 +23,77 @@ public class PrStoreDiffTests
             c => { Assert.Equal(PrChangeKind.Appeared, c.Kind); Assert.Equal(4, c.Current.Pr.Number); Assert.Null(c.PreviousStatus); });
     }
 
+    /// <summary>
+    /// A comment changes no status, so the diff is empty — but it must still land, or the 💬 marker would wait
+    /// for some unrelated change before appearing. Guards the short-circuit in Apply, not Diff.
+    /// </summary>
+    [Fact]
+    public void A_new_comment_alone_still_refreshes_the_snapshot()
+    {
+        var store = TempStore(out _);
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+
+        var updates = 0;
+        store.Updated += () => updates++;
+
+        // Same status, same updatedAt, same checks: only the comment moved.
+        var changes = store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0.AddMinutes(5))]);
+
+        Assert.Empty(changes);
+        Assert.Equal(1, updates);
+        Assert.Equal(T0.AddMinutes(5), Assert.Single(store.Current).Pr.LastCommentAt);
+    }
+
+    [Fact]
+    public void A_poll_that_changes_nothing_at_all_is_still_silent()
+    {
+        var store = TempStore(out _);
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+
+        var updates = 0;
+        store.Updated += () => updates++;
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+
+        Assert.Equal(0, updates);
+    }
+
+    /// <summary>
+    /// The snapshot restored from disk reaches subscribers only when Start says so. Without it each consumer
+    /// has to prime itself, which makes correctness depend on the order the subscriptions were attached.
+    /// </summary>
+    [Fact]
+    public void Start_announces_the_restored_snapshot_to_whoever_subscribed()
+    {
+        var path = TempPath();
+        new PrStore(new JsonFileStore<List<TrackedPr>>(path)).Apply([Tracked(PrStatus.AwaitingReview)]);
+
+        var reopened = new PrStore(new JsonFileStore<List<TrackedPr>>(path));
+        var updates = 0;
+        reopened.Updated += () => updates++;
+
+        Assert.Equal(0, updates); // the constructor restored it, but silently
+        reopened.Start();
+        Assert.Equal(1, updates);
+        Assert.Single(reopened.Current);
+    }
+
+    /// <summary>
+    /// With no snapshot on disk there is nothing to announce, and announcing anyway would be destructive:
+    /// subscribers prune against what Current holds, and StarStore reads an empty snapshot as "every starred
+    /// PR is gone". A missing or corrupt snapshot.json must not cost the user their stars.
+    /// </summary>
+    [Fact]
+    public void Start_is_silent_when_there_was_nothing_to_restore()
+    {
+        var store = TempStore(out _); // nothing was ever written to this path
+        var updates = 0;
+        store.Updated += () => updates++;
+
+        store.Start();
+
+        Assert.Equal(0, updates);
+    }
+
     [Fact]
     public void Unchanged_snapshot_yields_no_changes()
     {

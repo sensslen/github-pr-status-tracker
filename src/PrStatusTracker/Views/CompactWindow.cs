@@ -28,13 +28,13 @@ public sealed class CompactWindow : Window
         Topmost = true;
         Title = "PR Status Tracker";
 
-        var groups = new[] { vm.NeedsYou, vm.WaitingOnOthers, vm.ReadyToMerge };
+        var groups = new[] { vm.NeedsYou, vm.WaitingOnOthers, vm.YourPrs };
         var lists = new Panel();
         var segments = new Grid { ColumnDefinitions = ColumnDefinitions.Parse("*,*,*") };
         for (var i = 0; i < groups.Length; i++)
         {
             var group = groups[i];
-            var list = BucketList(group);
+            var list = BucketList(vm, group);
             var segment = new Button()
                 .HorizontalAlignment(HorizontalAlignment.Stretch).HorizontalContentAlignment(HorizontalAlignment.Center)
                 .FontSize(11).Padding(4, 3).CornerRadius(4).BorderThickness(0).Cursor(HandCursor)
@@ -87,23 +87,25 @@ public sealed class CompactWindow : Window
         }
     }
 
-    private static Panel BucketList(PrGroupViewModel group) =>
+    private static Panel BucketList(MainViewModel vm, PrGroupViewModel group) =>
         new Panel().Children(
             new ScrollViewer().Padding(12, 0).Content(
-                new ItemsControl().Margin(0, 2, 0, 6).ItemsSource(group.Items).ItemTemplate(Template<PrItemViewModel>(item => CompactRow(item)))),
+                new ItemsControl().Margin(0, 2, 0, 6).ItemsSource(group.Items).ItemTemplate(Template<PrItemViewModel>(item => CompactRow(vm, item)))),
             EmptyLabel(group.EmptyText).Margin(12, 8).IsVisible(group, g => g.IsEmpty));
 
-    /// <summary>Single line: [CI badge] [★ if starred] title … age.</summary>
-    private static Button CompactRow(PrItemViewModel item) =>
+    /// <summary>Single line: [CI badge] [★ if starred] [⚠ if conflicted] [💬 if unread] title … age.</summary>
+    private static Button CompactRow(MainViewModel vm, PrItemViewModel item) =>
         Row(
             new DockPanel().Children(
                 CheckBadge(item.Checks).DockPanel_Dock(Dock.Left).Margin(0, 0, 8, 0),
                 StarMarker(item).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
                 ConflictMarker(item).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
+                // The popup has no room for a pill, so the glyph is the only place comments can show.
+                CommentMarker(item, item.HasNewComments).DockPanel_Dock(Dock.Left).Margin(0, 0, 6, 0),
                 AgeLabel(item).DockPanel_Dock(Dock.Right).Margin(8, 0, 0, 0),
                 new TextBlock().Text(item.Title).FontSize(12).VerticalAlignment(VerticalAlignment.Center)
                     .TextTrimming(TextTrimming.CharacterEllipsis)),
-            () => MainViewModel.OpenPr(item));
+            () => vm.OpenPr(item));
 
     /// <summary>
     /// Clicking the tray icon deactivates the popup (which hides it) before the click itself arrives, so a click

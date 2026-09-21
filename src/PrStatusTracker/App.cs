@@ -34,12 +34,18 @@ public sealed class App : Application
         var github = new GitHubClient(gh);
         var store = new PrStore(new JsonFileStore<List<TrackedPr>>(AppPaths.Snapshot));
         var stars = new StarStore(new JsonFileStore<List<string>>(AppPaths.Stars));
-        // A star outlives nothing: once a PR leaves the snapshot there is nothing left to star.
-        store.Updated += () => stars.Retain(store.Current.Select(t => t.Key));
+        var seen = new CommentSeenStore(new JsonFileStore<Dictionary<string, DateTimeOffset>>(AppPaths.CommentsSeen));
+        // Neither annotation outlives its PR: once one leaves the snapshot there is nothing left to star or read.
+        store.Updated += () =>
+        {
+            stars.Retain(store.Current.Select(t => t.Key));
+            seen.Sync(store.Current.Select(t => (t.Key, t.Pr.LastCommentAt)));
+        };
         var notifications = new NotificationService(store, Notifier.ForCurrentPlatform(),
             new JsonFileStore<List<NotificationRecord>>(AppPaths.Notifications), () => settings);
         var poller = new PollingService(github, store, () => settings);
-        var vm = new MainViewModel(store, stars, poller, notifications, settings, settingsFile, AutoStart.ForCurrentPlatform(), gh);
+        var vm = new MainViewModel(store, stars, seen, poller, notifications, settings, settingsFile,
+            AutoStart.ForCurrentPlatform(), gh);
 
         var appIcon = new WindowIcon(AssetLoader.Open(new Uri("avares://PrStatusTracker/Assets/github.png")));
         var window = new Window()
@@ -78,6 +84,11 @@ public sealed class App : Application
             ShowWindow();
         }
 
+        // Hand the restored snapshot to everything above before the first poll. A quiet poll raises no Updated
+        // of its own, so a PR carried over from a previous run would otherwise go unseeded until something about
+        // it changed — and if that something were a new comment, it would be seeded past the very comment it
+        // should have flagged.
+        store.Start();
         poller.Start();
     }
 }

@@ -28,9 +28,30 @@ public sealed record PullRequest(
     IReadOnlyList<string> RequestedReviewers,
     IReadOnlyList<Review> LatestReviews,
     DateTimeOffset? HeadCommittedAt,
-    CheckState? Checks)
+    CheckState? Checks,
+    // When someone other than you last said something here, and who. Only fetched for PRs you authored — they
+    // are the only ones whose comments are tracked as read or unread — so it is null everywhere else, which is
+    // indistinguishable from "nobody has commented" and does not need to be told apart.
+    DateTimeOffset? LastCommentAt = null,
+    string? LastCommentBy = null)
 {
     public string Key => $"{Repo}#{Number}";
+
+    /// <summary>
+    /// Whether this is the same PR state as <paramref name="other"/>, for deciding a poll changed nothing.
+    /// <para>
+    /// Record equality cannot answer this: the three list members are rebuilt from JSON on every poll and
+    /// compare by reference, so `==` is always false. Hence an explicit list — and the rule for extending it
+    /// lives here, next to the fields: <b>a field the UI reads that GitHub can change without stamping
+    /// <see cref="UpdatedAt"/> must be named below</b>, or the snapshot short-circuits and the UI goes stale
+    /// with nothing failing. Checks, mergeability and comment activity are all such fields.
+    /// </para>
+    /// </summary>
+    public bool SameStateAs(PullRequest other) =>
+        UpdatedAt == other.UpdatedAt
+        && Checks == other.Checks
+        && Mergeable == other.Mergeable
+        && LastCommentAt == other.LastCommentAt;
 
     // Snapshots written by an older build lack newer collection fields; they must read as empty, not null.
     public IReadOnlyList<string> Labels { get; init; } = Labels ?? [];

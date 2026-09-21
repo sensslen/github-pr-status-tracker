@@ -119,18 +119,103 @@ public class StatusEvaluatorTests
     [InlineData(PrStatus.RequestedViaTeam, PrBucket.NeedsYou)]
     [InlineData(PrStatus.AwaitingYourRereview, PrBucket.NeedsYou)]
     [InlineData(PrStatus.NewCommitsSinceYourReview, PrBucket.NeedsYou)]
-    [InlineData(PrStatus.MergeConflict, PrBucket.NeedsYou)]
-    [InlineData(PrStatus.ChecksFailing, PrBucket.NeedsYou)]
-    [InlineData(PrStatus.ChangesRequested, PrBucket.NeedsYou)]
-    [InlineData(PrStatus.NoReviewers, PrBucket.NeedsYou)]
-    [InlineData(PrStatus.ReadyToMerge, PrBucket.ReadyToMerge)]
-    [InlineData(PrStatus.ReadyToMergeConflict, PrBucket.ReadyToMerge)]
     [InlineData(PrStatus.YouApproved, PrBucket.WaitingOnOthers)]
     [InlineData(PrStatus.YouRequestedChanges, PrBucket.WaitingOnOthers)]
     [InlineData(PrStatus.YouCommented, PrBucket.WaitingOnOthers)]
-    [InlineData(PrStatus.Draft, PrBucket.WaitingOnOthers)]
     [InlineData(PrStatus.ReviewerDraft, PrBucket.WaitingOnOthers)]
-    [InlineData(PrStatus.ApprovedChecksPending, PrBucket.WaitingOnOthers)]
-    [InlineData(PrStatus.AwaitingReview, PrBucket.WaitingOnOthers)]
+    [InlineData(PrStatus.Draft, PrBucket.YourPrs)]
+    [InlineData(PrStatus.MergeConflict, PrBucket.YourPrs)]
+    [InlineData(PrStatus.ChecksFailing, PrBucket.YourPrs)]
+    [InlineData(PrStatus.ChangesRequested, PrBucket.YourPrs)]
+    [InlineData(PrStatus.ReadyToMerge, PrBucket.YourPrs)]
+    [InlineData(PrStatus.ReadyToMergeConflict, PrBucket.YourPrs)]
+    [InlineData(PrStatus.ApprovedChecksPending, PrBucket.YourPrs)]
+    [InlineData(PrStatus.AwaitingReview, PrBucket.YourPrs)]
+    [InlineData(PrStatus.NoReviewers, PrBucket.YourPrs)]
     public void Bucket_mapping(PrStatus status, PrBucket expected) => Assert.Equal(expected, status.Bucket());
+
+    /// <summary>
+    /// The partition the whole tab split rests on, pinned to the evaluator that produces it: whatever
+    /// `Evaluate` returns for a PR of yours must read as authored, and nothing it returns for anyone else's
+    /// may. Without this, a status added to one side and forgotten on the other misfiles silently.
+    /// </summary>
+    [Fact]
+    public void IsAuthored_agrees_with_the_evaluator()
+    {
+        PullRequest[] cases =
+        [
+            Pr(author: Me), Pr(author: Me, draft: true),
+            Pr(author: Me, decision: ReviewDecision.Approved), Pr(author: Me, decision: ReviewDecision.ChangesRequested),
+            Pr(author: Me, checks: CheckState.Failure), Pr(author: Me, mergeable: Mergeable.Conflicting),
+            Pr(author: Me, checks: CheckState.Pending, decision: ReviewDecision.Approved),
+            Pr(author: Me, requested: [Other]),
+            Pr(author: Other), Pr(author: Other, draft: true),
+            Pr(author: Other, requested: [Me]),
+            Pr(author: Other, reviews: [new Review(Me, ReviewState.Approved, T0)]),
+            Pr(author: Other, reviews: [new Review(Me, ReviewState.ChangesRequested, T0)]),
+            Pr(author: Other, reviews: [new Review(Me, ReviewState.Commented, T0)]),
+            Pr(author: Other, reviews: [new Review(Me, ReviewState.Approved, T0)], committed: T0.AddHours(1)),
+        ];
+
+        foreach (var pr in cases)
+        {
+            var status = StatusEvaluator.Evaluate(pr, Me);
+            Assert.Equal(pr.Author == Me, status.IsAuthored());
+            Assert.Equal(pr.Author == Me, status.Bucket() == PrBucket.YourPrs);
+        }
+    }
+
+    /// <summary>Everything you authored lands in one tab, so the callout is what sorts and colours it there.</summary>
+    [Theory]
+    [InlineData(PrStatus.ReadyToMerge, PrCallout.ReadyToMerge)]
+    [InlineData(PrStatus.ChecksFailing, PrCallout.ChecksFailing)]
+    [InlineData(PrStatus.MergeConflict, PrCallout.MergeConflict)]
+    [InlineData(PrStatus.ReadyToMergeConflict, PrCallout.MergeConflict)]
+    [InlineData(PrStatus.ChangesRequested, PrCallout.ChangesRequested)]
+    [InlineData(PrStatus.NoReviewers, PrCallout.NoReviewers)]
+    [InlineData(PrStatus.Draft, PrCallout.None)]
+    [InlineData(PrStatus.AwaitingReview, PrCallout.None)]
+    [InlineData(PrStatus.ApprovedChecksPending, PrCallout.None)]
+    public void Callout_mapping(PrStatus status, PrCallout expected) => Assert.Equal(expected, status.Callout());
+
+    /// <summary>
+    /// The two named distinctions the tray, the summary line and the notifier all key off. They differ on
+    /// purpose: a PR that is simply ready to merge is news worth a toast, but is not work, so it earns the
+    /// green tray icon rather than the orange one.
+    /// </summary>
+    [Theory]
+    [InlineData(PrCallout.None, false)]
+    [InlineData(PrCallout.ReadyToMerge, false)]
+    [InlineData(PrCallout.ChecksFailing, true)]
+    [InlineData(PrCallout.MergeConflict, true)]
+    [InlineData(PrCallout.ChangesRequested, true)]
+    [InlineData(PrCallout.NewComments, true)]
+    [InlineData(PrCallout.NoReviewers, true)]
+    public void IsWork_is_every_callout_but_a_pr_you_can_just_merge(PrCallout callout, bool expected) =>
+        Assert.Equal(expected, callout.IsWork());
+
+    [Theory]
+    [InlineData(PrStatus.AwaitingYourReview, true)]      // someone wants your review
+    [InlineData(PrStatus.RequestedViaTeam, true)]
+    [InlineData(PrStatus.ChecksFailing, true)]           // one of yours, and broken
+    [InlineData(PrStatus.ReadyToMerge, true)]            // one of yours, and there is a button to press
+    [InlineData(PrStatus.Draft, false)]
+    [InlineData(PrStatus.AwaitingReview, false)]         // one of yours, ticking along
+    [InlineData(PrStatus.ApprovedChecksPending, false)]
+    [InlineData(PrStatus.YouApproved, false)]            // you already did your part
+    [InlineData(PrStatus.ReviewerDraft, false)]
+    public void IsAskingSomething_is_the_test_for_whether_a_pr_turning_up_is_news(PrStatus status, bool expected) =>
+        Assert.Equal(expected, status.IsAskingSomething());
+
+    /// <summary>A PR you are reviewing never carries a callout — the Needs you tab is the callout.</summary>
+    [Theory]
+    [InlineData(PrStatus.AwaitingYourReview)]
+    [InlineData(PrStatus.RequestedViaTeam)]
+    [InlineData(PrStatus.AwaitingYourRereview)]
+    [InlineData(PrStatus.NewCommitsSinceYourReview)]
+    [InlineData(PrStatus.YouApproved)]
+    [InlineData(PrStatus.YouRequestedChanges)]
+    [InlineData(PrStatus.YouCommented)]
+    [InlineData(PrStatus.ReviewerDraft)]
+    public void Reviewer_statuses_have_no_callout(PrStatus status) => Assert.Equal(PrCallout.None, status.Callout());
 }

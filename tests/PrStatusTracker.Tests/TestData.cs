@@ -21,13 +21,16 @@ internal static class TestData
         DateTimeOffset? committed = null,
         IReadOnlyList<string>? labels = null,
         string repo = "org/repo",
-        string? title = null) =>
+        string? title = null,
+        DateTimeOffset? lastComment = null) =>
         new(repo, number, title ?? $"PR {number}", $"https://github.com/{repo}/pull/{number}", draft, author,
             CreatedAt: T0.AddDays(-1), UpdatedAt: T0, Additions: 10, Deletions: 2, Labels: labels ?? [],
-            decision, mergeable, requested ?? [], reviews ?? [], committed ?? T0, checks);
+            decision, mergeable, requested ?? [], reviews ?? [], committed ?? T0, checks,
+            LastCommentAt: lastComment, LastCommentBy: lastComment is null ? null : Other);
 
-    public static TrackedPr Tracked(PrStatus status, int number = 1, string author = Other) =>
-        new(Pr(number: number, author: author), status);
+    public static TrackedPr Tracked(PrStatus status, int number = 1, string author = Other,
+        DateTimeOffset? lastComment = null) =>
+        new(Pr(number: number, author: author, lastComment: lastComment), status);
 
     /// <summary>A fresh path in the tests' scratch directory. Nothing is created until something writes there.</summary>
     public static string TempPath() => Path.Combine(Path.GetTempPath(), "prst-tests", Guid.NewGuid() + ".json");

@@ -32,6 +32,25 @@ public sealed class PrStore
     public event Action<IReadOnlyList<PrChange>>? Changed;
     public event Action? Updated;
 
+    /// <summary>
+    /// Announce the snapshot restored from disk, once every subscriber is attached. The constructor cannot do
+    /// it — nobody is listening yet — and without it each consumer has to prime itself, which is an ordering
+    /// contract between subscribers that nothing states and nothing checks.
+    /// <para>
+    /// Silent when there was nothing to restore. Subscribers prune themselves against the snapshot, and
+    /// <see cref="StarStore.Retain"/> takes an empty one to mean every starred PR is gone — true of a snapshot
+    /// the poller just applied, but not of a missing or corrupt file, where announcing it would wipe the
+    /// user's stars before the first poll ever ran.
+    /// </para>
+    /// </summary>
+    public void Start()
+    {
+        if (_seeded)
+        {
+            Updated?.Invoke();
+        }
+    }
+
     /// <summary>Replace the snapshot. Returns the diff against the previous snapshot; on the very first
     /// snapshot ever seen (no persisted state), no changes are reported so a fresh install stays quiet.</summary>
     public IReadOnlyList<PrChange> Apply(IEnumerable<TrackedPr> items)
@@ -39,11 +58,10 @@ public sealed class PrStore
         var next = items.ToDictionary(t => t.Key);
         var changes = _seeded ? Diff(_current, next) : [];
 
-        // Nothing moved and nothing was touched upstream: skip the disk write and the UI rebuild. GitHub does not
-        // bump updatedAt for check runs or mergeability, so those are compared explicitly.
+        // Nothing moved and nothing was touched upstream: skip the disk write and the UI rebuild. What counts
+        // as touched is PullRequest's to say, and it documents the rule for extending it.
         var untouched = _seeded && changes.Count == 0
-            && next.Values.All(t => _current[t.Key].Pr is var old
-                && old.UpdatedAt == t.Pr.UpdatedAt && old.Checks == t.Pr.Checks && old.Mergeable == t.Pr.Mergeable);
+            && next.Values.All(t => _current[t.Key].Pr.SameStateAs(t.Pr));
         if (untouched)
         {
             return changes;

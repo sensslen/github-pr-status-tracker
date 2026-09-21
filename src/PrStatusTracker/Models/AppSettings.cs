@@ -12,7 +12,10 @@ public sealed class AppSettings
 
     public bool NotifyNeedsYou { get; set; } = true;
     public bool NotifyWaitingOnOthers { get; set; } = true;
-    public bool NotifyReadyToMerge { get; set; } = true;
+
+    /// <summary>Renamed from NotifyReadyToMerge when that bucket grew into every PR you authored; a settings
+    /// file written by an older build has no such key and falls back to the default.</summary>
+    public bool NotifyYourPrs { get; set; } = true;
     public bool NotifyClosed { get; set; } = true;
 
     public TimeSpan PollInterval => TimeSpan.FromMinutes(PollIntervalMinutes);

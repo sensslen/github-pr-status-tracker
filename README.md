@@ -11,16 +11,23 @@ It answers one question, quickly, without opening a browser:
 
 - **Lists open PRs you've been asked to review** — the ones where you are a requested
   reviewer (directly or through a team).
-- **Lists open PRs you authored** and where each one stands.
+- **Gathers every PR you authored into one tab**, and calls out the ones wanting something:
+  ready to merge, CI failing, a merge conflict, changes requested, nobody reviewing, or
+  comments you have not read.
 - **Classifies every PR relative to you** — awaiting your review, changes requested,
   approved and ready to merge, CI failing, merge conflict, draft, and so on. See
-  [Status model](ARCHITECTURE.md#status-model).
+  [Status model](ARCHITECTURE.md#4-status-model).
 - **Notifies you when a PR's state changes** — a review lands on your PR, a new PR is
   assigned to you, CI goes red, your PR becomes mergeable. Notifications use native OS
   toasts.
 - **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
   their tab and are marked in the tray popup. The star is local to the app; nothing is
   sent to GitHub.
+- **Flags comments you haven't read** on your own PRs, cleared by opening the PR. Resolved review
+  threads don't count — a conversation you've settled isn't waiting on you. A PR with nothing else
+  outstanding says *New comments* on its status pill; otherwise a 💬 sits beside it. This is a
+  marker, not a toast. Read state is local to the app, seeded quiet on first run so you don't
+  get a backlog.
 - **Keeps a notification history** — every notification is written to disk so you can
   dismiss it, come back to it later, and see what you missed while away.
 
@@ -29,12 +36,13 @@ It answers one question, quickly, without opening a browser:
 | Interaction | Result |
 |---|---|
 | Runs at login | Starts minimized to the system tray / menu bar |
-| Hover the tray icon | Tooltip with a brief summary (e.g. `3 need you · 2 waiting · 1 ready to merge`) |
-| Click the tray icon | Compact popup pinned by the tray: a *Needs you / Waiting / Ready* switch with counts, the selected list, and a button to the main window |
+| Hover the tray icon | Tooltip with a brief summary (e.g. `3 need you · 2 waiting · 7 yours (1 ready · 2 need attention)`) |
+| Click the tray icon | Compact popup pinned by the tray: a *Needs you / Waiting / Yours* switch with counts, the selected list, and a button to the main window |
 | Right-click the tray icon | Menu: open main window, refresh, open GitHub, quit |
-| Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Ready to merge*), plus Notifications and Settings; every row opens its PR |
+| Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Your PRs*), plus Notifications and Settings; every row opens its PR |
+| Your PRs tab | Everything you authored, whatever state it's in. A strip above the rows counts what's calling for attention (`2 ready to merge · 1 CI failing`), and those rows sort to the top |
 | Star a row (☆) | Pins that PR to the top of its tab and marks it ★ in the tray popup; persists across restarts. Click ★ again to unstar |
-| Filter bar | On the *Needs you* and *Waiting on others* tabs: free text (title, repo, author, label, `#number`) plus author / label / repo dropdowns; never affects the tray |
+| Filter bar | On every PR tab: free text (title, repo, author, label, `#number`) plus label / repo dropdowns, and author where there's more than one. *Needs you* and *Waiting on others* share a bar; *Your PRs* has its own, so narrowing one never narrows the other. Never affects the tray |
 | Toast notification | One toast per poll, however many PRs changed; clicking it opens the PR (or GitHub's PR list for a batch) |
 | Notification centre (in-app) | Persisted, dismissible list of past notifications |
 
@@ -171,5 +179,6 @@ from the app's own window icon.
 Working prototype. Phases 1–7 of the [implementation plan](ARCHITECTURE.md#implementation-plan)
 are in place: tray icon with tooltip summary, `gh`-backed polling, the status model with
 tests, change detection, native toasts (Windows verified; macOS untested), persisted
-notification history, starred PRs, settings, start-at-login, and the installers. Signing and notarization
-are not set up.
+notification history, starred PRs, the Your PRs tab with its callouts and unread-comment
+tracking, settings, start-at-login, and the installers. Signing and notarization are not
+set up.

@@ -150,15 +150,6 @@ public static class PrStatusExtensions
         _ => bucket.ToString(),
     };
 
-    /// <summary>For narrow spaces such as the compact popup's segmented control.</summary>
-    public static string ShortLabel(this PrBucket bucket) => bucket switch
-    {
-        PrBucket.NeedsYou => "Needs you",
-        PrBucket.WaitingOnOthers => "Waiting",
-        PrBucket.YourPrs => "Yours",
-        _ => bucket.ToString(),
-    };
-
     public static string EmptyText(this PrBucket bucket) => bucket switch
     {
         PrBucket.NeedsYou => "Nothing needs you right now.",

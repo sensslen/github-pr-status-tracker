@@ -21,8 +21,7 @@ It answers one question, quickly, without opening a browser:
   assigned to you, CI goes red, your PR becomes mergeable. Notifications use native OS
   toasts.
 - **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
-  their tab and are marked in the tray popup. The star is local to the app; nothing is
-  sent to GitHub.
+  their tab. The star is local to the app; nothing is sent to GitHub.
 - **Flags comments you haven't read** on your own PRs, cleared by opening the PR. Resolved review
   threads don't count — a conversation you've settled isn't waiting on you. A PR with nothing else
   outstanding says *New comments* on its status pill; otherwise a 💬 sits beside it. This is a
@@ -37,11 +36,11 @@ It answers one question, quickly, without opening a browser:
 |---|---|
 | Runs at login | Starts minimized to the system tray / menu bar |
 | Hover the tray icon | Tooltip with a brief summary (e.g. `3 need you · 2 waiting · 7 yours (1 ready · 2 need attention)`) |
-| Click the tray icon | Compact popup pinned by the tray: a *Needs you / Waiting / Yours* switch with counts, the selected list, and a button to the main window |
+| Click the tray icon | Opens the main window |
 | Right-click the tray icon | Menu: open main window, refresh, open GitHub, quit |
 | Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Your PRs*), plus Notifications and Settings; every row opens its PR |
 | Your PRs tab | Everything you authored, whatever state it's in. A strip above the rows counts what's calling for attention (`2 ready to merge · 1 CI failing`), and those rows sort to the top |
-| Star a row (☆) | Pins that PR to the top of its tab and marks it ★ in the tray popup; persists across restarts. Click ★ again to unstar |
+| Star a row (☆) | Pins that PR to the top of its tab; persists across restarts. Click ★ again to unstar |
 | Filter bar | On every PR tab: free text (title, repo, author, label, `#number`) plus label / repo dropdowns, and author where there's more than one. *Needs you* and *Waiting on others* share a bar; *Your PRs* has its own, so narrowing one never narrows the other. Never affects the tray |
 | Toast notification | One toast per poll, however many PRs changed; clicking it opens the PR (or GitHub's PR list for a batch) |
 | Notification centre (in-app) | Persisted, dismissible list of past notifications |

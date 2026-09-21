@@ -45,7 +45,7 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
         new TabItem { Content = PrListView.Build(vm, group) }.Header(group, g => g.Header);
 }
 
-/// <summary>Shared building blocks so the PR list, notification list and compact popup stay visually consistent.</summary>
+/// <summary>Shared building blocks so the PR list and notification list stay visually consistent.</summary>
 internal static class ViewHelpers
 {
     public static readonly IBrush NeedsYouBrush = new ImmutableSolidColorBrush(Color.Parse("#DB6D28"));
@@ -60,9 +60,9 @@ internal static class ViewHelpers
 
     public static FuncDataTemplate<T> Template<T>(Func<T, Control> build) => new((item, _) => build(item), supportsRecycling: false);
 
-    /// <summary>Bucket chrome — the popup's segmented control. Your PRs hold every state at once, so the tab
-    /// itself gets a neutral accent and the rows inside it carry the colour.</summary>
-    public static IBrush BucketBrush(PrBucket bucket) => bucket switch
+    /// <summary>The fallback colour for a row with no callout of its own. Your PRs hold every state at once,
+    /// so that bucket gets a neutral accent and the rows inside it carry the colour.</summary>
+    private static IBrush BucketBrush(PrBucket bucket) => bucket switch
     {
         PrBucket.NeedsYou => NeedsYouBrush,
         PrBucket.YourPrs => AccentBrush,
@@ -85,37 +85,23 @@ internal static class ViewHelpers
     };
 
     /// <summary>
-    /// A one-glyph flag for rows too narrow to spell anything out. Always built, and collapsed out of the layout
-    /// when there is nothing to flag, so the row stays a single declarative expression like every other row here.
+    /// Flags unresolved comments left since you last opened the PR; clicking the row clears it. Whether it is
+    /// wanted is the caller's to say, because a row whose pill already reads "New comments" does not need the
+    /// same thing said twice. Always built, and collapsed out of the layout when it is not wanted, so the row
+    /// stays a single declarative expression like every other row here.
     /// </summary>
-    private static TextBlock Marker(string glyph, IBrush brush, string tip, bool visible)
+    public static TextBlock CommentMarker(PrItemViewModel item, bool visible)
     {
-        var label = new TextBlock().Text(glyph).FontSize(11).FontWeight(FontWeight.SemiBold).Foreground(brush)
-            .VerticalAlignment(VerticalAlignment.Center)
+        var label = new TextBlock().Text("💬").FontSize(11).FontWeight(FontWeight.SemiBold)
+            .Foreground(AccentBrush).VerticalAlignment(VerticalAlignment.Center)
             .IsVisible(visible);
         if (visible)
         {
-            ToolTip.SetTip(label, tip);
+            ToolTip.SetTip(label, item.NewCommentsTip);
         }
 
         return label;
     }
-
-    /// <summary>Flags a conflict on rows too narrow for a status pill. Red, to match the pill it stands in for.</summary>
-    public static TextBlock ConflictMarker(PrItemViewModel item) =>
-        Marker("⚠", FailBrush, "Merge conflict", item.HasConflict);
-
-    /// <summary>Read-only star for rows too dense to toggle on, such as the compact popup's.</summary>
-    public static TextBlock StarMarker(PrItemViewModel item) =>
-        Marker("★", StarBrush, "Starred", item.IsStarred);
-
-    /// <summary>
-    /// Flags unresolved comments left since you last opened the PR; clicking the row clears it. Whether it is
-    /// wanted is the caller's to say, because a row whose pill already reads "New comments" does not need the
-    /// same thing said twice — a row with no pill at all does.
-    /// </summary>
-    public static TextBlock CommentMarker(PrItemViewModel item, bool visible) =>
-        Marker("💬", AccentBrush, item.NewCommentsTip, visible);
 
     /// <summary>
     /// The star toggle on a main-window row. Filled and gold when starred, a dim outline otherwise — always

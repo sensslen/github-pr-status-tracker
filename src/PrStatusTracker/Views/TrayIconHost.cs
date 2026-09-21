@@ -5,7 +5,7 @@ using PrStatusTracker.ViewModels;
 namespace PrStatusTracker.Views;
 
 /// <summary>
-/// Owns the tray icon: tooltip summary, icon variant, context menu. Left-click opens the compact popup;
+/// Owns the tray icon: tooltip summary, icon variant, context menu. Left-click opens the main window;
 /// the right-click menu is Avalonia's native menu (the TrayIcon API exposes no right-click event).
 /// </summary>
 public sealed class TrayIconHost : IDisposable
@@ -15,7 +15,7 @@ public sealed class TrayIconHost : IDisposable
     private readonly Dictionary<TrayState, WindowIcon> _icons = [];
     private TrayState? _shown;
 
-    public TrayIconHost(Application app, MainViewModel vm, Action showCompact, Action showMainWindow, Action quit)
+    public TrayIconHost(Application app, MainViewModel vm, Action showMainWindow, Action quit)
     {
         _vm = vm;
 
@@ -27,7 +27,7 @@ public sealed class TrayIconHost : IDisposable
         menu.Items.Add(MenuItem("Quit", quit));
 
         _icon = new TrayIcon { Menu = menu };
-        _icon.Clicked += (_, _) => showCompact();
+        _icon.Clicked += (_, _) => showMainWindow();
         TrayIcon.SetIcons(app, [_icon]);
 
         // The view model only raises these on the UI thread.

@@ -22,9 +22,6 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred, bool hasN
     public bool IsOverdue { get; } = DateTimeOffset.Now - tracked.Pr.CreatedAt > TimeSpan.FromHours(24);
     public CheckState? Checks { get; } = tracked.Pr.Checks;
 
-    /// <summary>The branch will not merge as it stands. Worth flagging even where the status pill does not say so.</summary>
-    public bool HasConflict { get; } = IsConflicted(tracked.Pr);
-
     /// <summary>One dense line: repo, author, size, review tallies, labels, last activity.</summary>
     public string Details { get; } = BuildDetails(tracked.Pr);
 
@@ -120,7 +117,6 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
     public int TotalCount { get; private set; }
 
     [ObservableProperty] public partial string Header { get; set; } = bucket.Label();
-    [ObservableProperty] public partial string ShortHeader { get; set; } = bucket.ShortLabel();
     [ObservableProperty] public partial bool IsEmpty { get; set; } = true;
 
     /// <summary>
@@ -151,7 +147,6 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         Header = filter.IsActive && Items.Count != TotalCount
             ? $"{Bucket.Label()} ({Items.Count} of {TotalCount})"
             : MainViewModel.WithCount(Bucket.Label(), TotalCount);
-        ShortHeader = MainViewModel.WithCount(Bucket.ShortLabel(), TotalCount);
         // Rows on the review tabs never carry a callout, so there is nothing there to add up.
         Attention = Bucket == PrBucket.YourPrs ? Summarise(Items) : string.Empty;
     }

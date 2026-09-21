@@ -47,7 +47,6 @@ public sealed class App : Application
         var vm = new MainViewModel(store, stars, seen, poller, notifications, settings, settingsFile,
             AutoStart.ForCurrentPlatform(), gh);
 
-        var appIcon = new WindowIcon(AssetLoader.Open(new Uri("avares://PrStatusTracker/Assets/github.png")));
         var window = new Window()
             .Title("PR Status Tracker")
             .Width(820)
@@ -55,7 +54,7 @@ public sealed class App : Application
             .MinWidth(520)
             .MinHeight(320)
             .Content(new MainView(vm));
-        window.Icon = appIcon;
+        window.Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://PrStatusTracker/Assets/github.png")));
         window.Closing += (_, e) => { e.Cancel = true; window.Hide(); };
 
         void ShowWindow()
@@ -69,8 +68,7 @@ public sealed class App : Application
             window.Activate();
         }
 
-        var compact = new CompactWindow(vm, ShowWindow) { Icon = appIcon };
-        var tray = new TrayIconHost(this, vm, compact.Toggle, ShowWindow, () => desktop.Shutdown());
+        var tray = new TrayIconHost(this, vm, ShowWindow, () => desktop.Shutdown());
 
         desktop.Exit += (_, _) =>
         {

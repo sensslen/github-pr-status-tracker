@@ -73,7 +73,6 @@ src/PrStatusTracker/
     PrListView.cs
     NotificationsView.cs
     SettingsView.cs
-    CompactWindow.cs          // the tray popup
     TrayIconHost.cs           // tooltip, icon variant, menu
   ViewModels/
     PrFilterViewModel.cs      // one filter bar's state; a tab owns or shares one
@@ -381,22 +380,17 @@ tree; no XAML and no `.axaml` files in the project.
 - `ToolTipText` is rewritten after every poll with the summary line
   (`3 need you · 2 waiting · 7 yours (1 ready · 2 need attention)`). That is the hover
   behaviour. The parenthetical is dropped when neither count is above zero.
-- `Clicked` (left-click) toggles the **compact popup**. Avalonia's `TrayIcon` has no
-  right-click event — right-click is reserved for the native menu — so the popup lives on
-  left-click rather than right-click.
+- `Clicked` (left-click) opens the main window — the same action as the menu's *Open main
+  window*, deliberately a plain show rather than a toggle, so the gesture never hides what you
+  just clicked to see. Avalonia's `TrayIcon` has no right-click event — right-click is reserved
+  for the native menu — so left-click is the only gesture the app gets, and it goes to the one
+  place that shows everything. A compact popup pinned to the tray used to live here; it was
+  removed because it never worked on macOS and did not earn its keep on Windows.
 - Right-click menu: *Open main window*, *Refresh now*, *Open GitHub pull requests*, *Quit*.
 - Four icon variants, drawn to be distinguishable at 16 px: grey ring (idle), orange with
   `!` (needs you), green with a check (ready to merge), red with `×` (error). Which one shows
   is driven by callouts rather than tab sizes: a tab full of your own drafts is not a reason to
   light the tray up, and a PR of yours with failing checks is.
-
-**Compact popup** (`CompactWindow`) — fixed 380×440, no window chrome, not resizable or
-movable, pinned to the tray corner (bottom-right on Windows, top-right on macOS), hides
-when it loses focus. A **segmented control** at the top switches between the three buckets
-(`Needs you (13) · Waiting (5) · Yours (7)`; a segmented control rather than a dropdown so
-the counts are visible and switching is one click), with the selected bucket's rows below
-as single-line `[CI badge] [★ if starred] [⚠ if conflicted] [💬 if unread] title … age` entries, and *Open main window* / *Refresh* at the
-bottom. The popup is never filtered — it shows the same unfiltered set the tray counts.
 
 **Main window** — one window, a filter bar, and one tab per bucket plus two more.
 
@@ -450,12 +444,11 @@ Tabs:
    pill is not already saying so — a quiet status is overruled, so a PR with nothing else outstanding reads
    *New comments* on the pill itself rather than claiming to be merely *Awaiting review* while the strip
    counts it as wanting something. Where the status carries a callout of its own, that leads and the marker
-   carries the rest. The compact popup has no pill, so there the marker is the only place comments can show. `CommentSeenStore` holds
-   one timestamp per PR, and opening the PR from any tab marks it read. A PR the store has never
-   heard of reads as *quiet* — `HasUnread` says so itself, rather than depending on a seeding pass
-   having run first — so a fresh install does not announce a backlog you read on GitHub months
-   ago. `Sync` still records where each newly seen PR starts, which is what lets comments arriving
-   *after* that poll register as new; it also prunes PRs that have left the snapshot, the same job
+   carries the rest. `CommentSeenStore` holds one timestamp per PR, and opening the PR from any tab marks it
+   read. A PR the store has never heard of reads as *quiet* — `HasUnread` says so itself, rather than
+   depending on a seeding pass having run first — so a fresh install does not announce a backlog you read on
+   GitHub months ago. `Sync` still records where each newly seen PR starts, which is what lets comments
+   arriving *after* that poll register as new; it also prunes PRs that have left the snapshot, the same job
    `StarStore.Retain` does for stars.
 2. **Notifications (n)** — the persisted history, newest first, unread count in the header;
    each title is `<what happened> — <PR title>`. *Dismiss* per row, *Dismiss all*, and a
@@ -519,8 +512,9 @@ Each phase ends with something runnable.
 ### Progress
 
 Phases 1–7 are implemented and the app runs against live data on Windows; signing and
-notarization are the part of phase 7 that is not done. macOS code paths compile but have not
-been run on a Mac.
+notarization are the part of phase 7 that is not done. macOS code paths compile, but the only
+one tried on a Mac — the tray's compact popup — did not work, and it has since been removed
+rather than fixed. The rest is still unexercised there.
 
 ### Known unknowns
 
@@ -530,6 +524,11 @@ been run on a Mac.
   builds; whether it is good enough day-to-day is still to be judged on a Mac.
 - ~~**`statusCheckRollup` is `null` on PRs with no checks.**~~ Handled: `null` maps to "no
   checks", which counts as green for *Ready to merge*. Covered by a unit test.
+- **Menu-bar window activation on macOS.** The bundle sets `LSUIElement`, so the app is an
+  accessory with no Dock tile and is never the frontmost application. Whether `Show()` plus
+  `Activate()` is enough to bring the main window forward and give it key focus from a
+  menu-bar click is untested; it may need the application activated first. This is the path
+  the removed popup used to cover.
 - **Snapshot age on the tray.** `PrItemViewModel.Age` is computed when the snapshot is
   applied, so it goes stale between polls; fine at a 2-minute interval, worth a timer if
   the interval is raised.

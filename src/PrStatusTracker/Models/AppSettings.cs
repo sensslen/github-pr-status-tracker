@@ -18,5 +18,12 @@ public sealed class AppSettings
     public bool NotifyYourPrs { get; set; } = true;
     public bool NotifyClosed { get; set; } = true;
 
+    /// <summary>
+    /// Whether the Needs you tab hides the PRs you were only asked for because a team you belong to was.
+    /// A standing preference rather than part of the filter bar, so it survives a restart; a settings file
+    /// written before it existed has no such key and falls back to showing them.
+    /// </summary>
+    public bool HideTeamOnlyRequests { get; set; }
+
     public TimeSpan PollInterval => TimeSpan.FromMinutes(PollIntervalMinutes);
 }

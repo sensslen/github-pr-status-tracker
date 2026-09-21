@@ -168,8 +168,12 @@ internal static class ViewHelpers
         return row;
     }
 
-    public static TextBlock EmptyLabel(string text) =>
-        new TextBlock().Text(text).FontSize(12).Opacity(0.5).FontStyle(FontStyle.Italic);
+    /// <summary>
+    /// The placeholder shown in place of rows. Bound rather than fixed, because the wording turns on whether the
+    /// tab is empty or merely narrowed to nothing.
+    /// </summary>
+    public static TextBlock EmptyLabel(PrGroupViewModel group) =>
+        new TextBlock().Text(group, g => g.EmptyText).FontSize(12).Opacity(0.5).FontStyle(FontStyle.Italic);
 
     /// <summary>The PR's age; bold, coloured and flagged once it has been open for more than a day.</summary>
     public static TextBlock AgeLabel(PrItemViewModel item)

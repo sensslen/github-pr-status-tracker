@@ -359,7 +359,7 @@ Four JSON files under the platform app-data directory
 
 | File | Contents |
 |---|---|
-| `settings.json` | poll interval and notification prefs (start-at-login lives in the OS, not here) |
+| `settings.json` | poll interval, notification prefs, hide-team-only-requests (start-at-login lives in the OS, not here) |
 | `notifications.json` | rolling history, capped at 200: `Title`, `Body`, `Url`, `Timestamp`, `Dismissed` |
 | `snapshot.json` | last PR snapshot, so a restart does not re-notify everything |
 | `stars.json` | keys (`repo#number`) of the PRs you starred; pruned to the live snapshot |
@@ -399,6 +399,9 @@ author, labels and `#number`, case-insensitively) and *Any author* / *Any label*
 dropdowns whose choices are rebuilt on every poll (a still-valid selection survives the rebuild).
 While a bar is active the tab header reads `Needs you (3 of 13)` and a *Clear* button appears.
 Filtering is view-only: the summary line, tray icon and toasts always describe the unfiltered set.
+A tab narrowed until no rows are left says *No pull requests match.* rather than the bucket's own empty
+text — "Nothing needs you right now" is a claim about the whole bucket, and it is false of a tab that
+simply is not showing what it has. Which narrowing emptied it does not matter, so neither line names one.
 The matching rules live in `Core/PrFilter.cs` and the bar's state in `PrFilterViewModel`, so both
 are unit-tested without any UI.
 
@@ -413,6 +416,23 @@ PRs in rather than every repo you have ever been asked to review.
 choice. With a bar of its own that is all it takes: the dimension is simply never set, rather than
 set-but-hidden. (The free-text box still matches author on every tab, which is why its placeholder
 is unchanged; only the dropdown goes.)
+
+*Needs you* carries one narrowing of its own, on a line under the bar: **Hide team-only requests**,
+which drops the rows you are only being asked for because a team you belong to was. It cannot be a
+dimension of the bar, which Needs you shares with Waiting on others — narrowing one of those tabs must
+not narrow the other. Unlike the bar it is a standing preference, so the value lives in `settings.json`
+as `HideTeamOnlyRequests` and reaches the tab through `MainViewModel` like every other setting; the tab
+holds it as a plain input and `Replace` sifts by it. *Clear* resets the bar and leaves it alone.
+
+Which tab offers the control is asked of `Bucket()` rather than hard-coded —
+`CanHideTeamOnly` is `PrStatus.RequestedViaTeam.Bucket() == bucket` — so the partition stays stated
+once: re-file that status and the checkbox follows it, instead of sitting on a tab where it hides
+nothing. The narrowing is view-only like the bar's, so with it on the tray still says `13 need you`
+and one click lands on a tab showing three. Accounting for the gap is the header's job, and it needs
+no help: `Items.Count != TotalCount` *is* "this tab is narrowed", since nothing here adds rows and an
+inactive bar matches everything — so no future narrowing has to be named on that line. Beside it the
+checkbox names its own count while it is hiding something (`Hide team-only requests (4 hidden)`),
+counting what unchecking it would bring back rather than rows the bar was excluding anyway.
 
 Tabs:
 

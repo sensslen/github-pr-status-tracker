@@ -10,29 +10,42 @@ internal static class PrListView
     public static Control Build(MainViewModel vm, PrGroupViewModel group) =>
         new DockPanel().Children(
             FilterBar(group.Filter).DockPanel_Dock(Dock.Top),
+            TeamOnlyToggle(vm, group).DockPanel_Dock(Dock.Top),
             AttentionStrip(group).DockPanel_Dock(Dock.Top),
             new Panel().Children(
                 new ScrollViewer().Content(
                     new ItemsControl().Margin(10, 8).ItemsSource(group.Items).ItemTemplate(Template<PrItemViewModel>(item => BuildRow(vm, item)))),
-                EmptyLabel(group.EmptyText).Margin(10, 8).IsVisible(group, g => g.IsEmpty)));
+                EmptyLabel(group).Margin(10, 8).IsVisible(group, g => g.IsEmpty)));
+
+    /// <summary>
+    /// The Needs you tab's own line under the bar: drop the PRs you are only being asked for because a team you
+    /// belong to was. Gated on the group the same way the author dropdown is gated on the bar, so a tab that
+    /// could never hold such a row does not offer the control — and the line stays free for the attention strip
+    /// on the one tab that has one.
+    /// </summary>
+    private static Border TeamOnlyToggle(MainViewModel vm, PrGroupViewModel group) =>
+        Strip(new CheckBox().FontSize(11.5).MinHeight(0)
+                .ToolTip_Tip("PRs where only a team you belong to was asked, not you personally")
+                .IsChecked(vm, x => x.HideTeamOnlyRequests, BindingMode.TwoWay)
+                .Content(group, g => g.HideTeamOnlyLabel))
+            .IsVisible(group.CanHideTeamOnly);
 
     /// <summary>
     /// What the rows below want — `2 ready to merge · 1 CI failing · 1 with new comments`. Collapses to nothing
     /// on the review tabs, whose rows never carry a callout, so they look exactly as they did.
     /// </summary>
     private static Border AttentionStrip(PrGroupViewModel group) =>
-        new Border().Padding(10, 8, 10, 0)
-            .IsVisible(group, g => g.HasAttention)
-            .Child(new TextBlock().FontSize(11.5).FontWeight(FontWeight.Medium).Foreground(AccentBrush)
+        Strip(new TextBlock().FontSize(11.5).FontWeight(FontWeight.Medium).Foreground(AccentBrush)
                 .TextTrimming(TextTrimming.CharacterEllipsis)
-                .Text(group, g => g.Attention));
+                .Text(group, g => g.Attention))
+            .IsVisible(group, g => g.HasAttention);
 
     /// <summary>
     /// Free-text box plus label / repo dropdowns, and author where there is more than one to choose from.
     /// Bound to the tab's own filter, so what a bar narrows is exactly the list sitting under it.
     /// </summary>
     private static Border FilterBar(PrFilterViewModel filter) =>
-        new Border().Padding(10, 8, 10, 0).Child(
+        Strip(
             new DockPanel().Children(
                 new Button().DockPanel_Dock(Dock.Right).Content("Clear").FontSize(11).Padding(8, 3).Margin(6, 0, 0, 0)
                     .IsVisible(filter, f => f.IsActive)
@@ -46,6 +59,9 @@ internal static class PrListView
                 new TextBox().FontSize(12).MinHeight(28).Padding(8, 4)
                     .PlaceholderText("Filter by title, repo, author, label or #number")
                     .Text(filter, f => f.Text, BindingMode.TwoWay)));
+
+    /// <summary>One of the full-width lines stacked above the rows; they share their inset so they line up.</summary>
+    private static Border Strip(Control child) => new Border().Padding(10, 8, 10, 0).Child(child);
 
     private static ComboBox FilterCombo(System.Collections.IEnumerable items) =>
         new ComboBox().ItemsSource(items).FontSize(12).MinWidth(130).MaxWidth(200).MinHeight(28).Padding(8, 2).Margin(6, 0, 0, 0)

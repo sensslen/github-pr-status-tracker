@@ -106,18 +106,50 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred, bool hasN
 /// <summary>One bucket's rows plus the derived bits the views bind to (tab header, empty state).</summary>
 public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel filter) : ObservableObject
 {
+    private const string HideTeamOnlyText = "Hide team-only requests";
+
+    /// <summary>
+    /// Stands in for the bucket's own wording once a tab is narrowed. "Nothing needs you right now" is a claim
+    /// about the whole bucket, and it is false of a tab that is merely not showing what it has — the header
+    /// directly above would be reading `(0 of 8)` while this said there was nothing there. It needs no count
+    /// of its own, because that header carries it.
+    /// </summary>
+    private const string NarrowedEmptyText = "No pull requests match.";
+
     public PrBucket Bucket { get; } = bucket;
 
     /// <summary>The bar above this tab's rows. Some tabs share one of these; Your PRs has its own.</summary>
     public PrFilterViewModel Filter { get; } = filter;
-    public string EmptyText { get; } = bucket.EmptyText();
+    [ObservableProperty] public partial string EmptyText { get; set; } = bucket.EmptyText();
     public ObservableCollection<PrItemViewModel> Items { get; } = [];
 
     /// <summary>Rows in this bucket before filtering; what the tray and summary count.</summary>
     public int TotalCount { get; private set; }
 
+    /// <summary>
+    /// Whether this tab offers the team-only toggle: the one whose bucket those rows actually land in. Asked of
+    /// <see cref="PrStatusExtensions.Bucket"/> rather than hard-coded to Needs you, so the partition stays
+    /// stated once — re-file <see cref="PrStatus.RequestedViaTeam"/> and the control follows it, instead of
+    /// sitting on a tab where it hides nothing with nothing failing.
+    /// </summary>
+    public bool CanHideTeamOnly { get; } = PrStatus.RequestedViaTeam.Bucket() == bucket;
+
     [ObservableProperty] public partial string Header { get; set; } = bucket.Label();
     [ObservableProperty] public partial bool IsEmpty { get; set; } = true;
+
+    /// <summary>
+    /// Drop the rows you are only being asked for because a team you belong to was. It is narrowing rather than
+    /// a dimension of <see cref="Filter"/> because Needs you shares its bar with Waiting on others, where
+    /// narrowing one tab must not narrow the other. View-only, like the bar: the summary line and the tray go
+    /// on counting what it hides. <see cref="MainViewModel"/> owns the value and assigns it here.
+    /// </summary>
+    public bool HideTeamOnly { get; set; }
+
+    /// <summary>
+    /// The checkbox's own text, which names the count while it is hiding something — with no bar active, that
+    /// and the header are the only things on screen accounting for rows that are not there.
+    /// </summary>
+    [ObservableProperty] public partial string HideTeamOnlyLabel { get; set; } = HideTeamOnlyText;
 
     /// <summary>
     /// What the visible rows are calling for — `2 ready to merge · 1 CI failing`. Unlike the summary line, this
@@ -133,18 +165,35 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
     public void Replace(IReadOnlyList<PrItemViewModel> all)
     {
         var filter = Filter.Current;
+        // The flag is only ever set on the tab that offers it; asking both keeps that true of the class, not
+        // just of its caller, the way Current drops an Author a bar has no dropdown for.
+        var hidingTeamOnly = CanHideTeamOnly && HideTeamOnly;
+        var teamOnlyHidden = 0;
         TotalCount = all.Count;
         Items.Clear();
-        foreach (var item in all)
+        // Sifted by the bar first, so the count below is what unchecking the box would bring back rather than
+        // rows the bar was excluding anyway.
+        foreach (var item in all.Where(i => filter.Matches(i.Pr)))
         {
-            if (filter.Matches(item.Pr))
+            if (hidingTeamOnly && item.Status == PrStatus.RequestedViaTeam)
             {
-                Items.Add(item);
+                teamOnlyHidden++;
+                continue;
             }
+
+            Items.Add(item);
         }
 
         IsEmpty = Items.Count == 0;
-        Header = filter.IsActive && Items.Count != TotalCount
+        // Empty and narrowed-to-nothing are different states, and only the first is the bucket's to describe.
+        // Conditioned on what will actually be shown, so the property does not read as a claim about a tab
+        // that has rows — and, like the header, without naming which narrowing emptied it.
+        EmptyText = IsEmpty && TotalCount > 0 ? NarrowedEmptyText : Bucket.EmptyText();
+        HideTeamOnlyLabel = teamOnlyHidden > 0 ? $"{HideTeamOnlyText} ({teamOnlyHidden} hidden)" : HideTeamOnlyText;
+        // Missing rows are the whole test for whether this tab is narrowed, whatever did the narrowing: nothing
+        // here adds rows, and a bar that is not active matches everything. So no future narrowing has to be
+        // named on this line — which is what the toggle would otherwise have had to be.
+        Header = Items.Count != TotalCount
             ? $"{Bucket.Label()} ({Items.Count} of {TotalCount})"
             : MainViewModel.WithCount(Bucket.Label(), TotalCount);
         // Rows on the review tabs never carry a callout, so there is nothing there to add up.
@@ -204,6 +253,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         ReviewFilter.Changed += RefreshGroups;
         YourPrsFilter.Changed += RefreshGroups;
+        NeedsYou.HideTeamOnly = settings.HideTeamOnlyRequests;
         store.Updated += () => Dispatcher.UIThread.Post(RefreshGroups);
         stars.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
         seen.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
@@ -277,6 +327,24 @@ public sealed partial class MainViewModel : ObservableObject
         set => SetSetting(_settings.NotifyClosed, value, (s, v) => s.NotifyClosed = v);
     }
 
+    /// <summary>
+    /// The Needs you tab's own narrowing. A pass-through like the rest, so the setting has one authority and
+    /// one save path; the tab is handed the value and rebuilt from it. Only the rows move — the summary line
+    /// and the tray recompute from the unfiltered snapshot exactly as they did.
+    /// </summary>
+    public bool HideTeamOnlyRequests
+    {
+        get => _settings.HideTeamOnlyRequests;
+        set
+        {
+            if (SetSetting(_settings.HideTeamOnlyRequests, value, (s, v) => s.HideTeamOnlyRequests = v))
+            {
+                NeedsYou.HideTeamOnly = value;
+                RefreshGroups();
+            }
+        }
+    }
+
     /// <summary>The OS autostart entry is the source of truth; nothing is stored in settings.</summary>
     public bool StartAtLogin
     {
@@ -311,12 +379,15 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    private void SetSetting<T>(T current, T value, Action<AppSettings, T> assign, [CallerMemberName] string? propertyName = null)
+    private bool SetSetting<T>(T current, T value, Action<AppSettings, T> assign, [CallerMemberName] string? propertyName = null)
     {
-        if (SetProperty(current, value, _settings, assign, propertyName))
+        if (!SetProperty(current, value, _settings, assign, propertyName))
         {
-            _settingsFile.Save(_settings);
+            return false;
         }
+
+        _settingsFile.Save(_settings);
+        return true;
     }
 
     // --- actions -------------------------------------------------------------------------------------------

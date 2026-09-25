@@ -252,6 +252,17 @@ public class GitHubClientParseTests
 
             await Assert.ThrowsAsync<GhException>(() => client.FetchPullRequestsAsync(Me));
         }
+
+        [Fact]
+        public async Task A_cursor_that_does_not_advance_fails_the_poll()
+        {
+            var calls = new List<IReadOnlyList<string>>();
+            var client = Client(calls, new Queue<string>([Search()]),
+                new Queue<string>([Threads("", nextCursor: "page1"), Threads("", nextCursor: "page1")]));
+
+            await Assert.ThrowsAsync<JsonException>(() => client.FetchPullRequestsAsync(Me));
+            Assert.Equal(3, calls.Count);
+        }
     }
 
     [Fact]

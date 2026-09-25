@@ -101,11 +101,13 @@ public sealed class GitHubClient : IGitHubClient
         foreach (var (id, first) in await ThreadPagesAsync(ids, null, ct))
         {
             var threads = first;
+            string? cursor = null;
             var isOpen = HasActionable(threads, viewer);
             while (!isOpen && threads["pageInfo"]?["hasNextPage"]?.GetValue<bool>() == true)
             {
-                var cursor = threads["pageInfo"]?["endCursor"]?.GetValue<string>()
+                var next = threads["pageInfo"]?["endCursor"]?.GetValue<string>()
                     ?? throw new JsonException("Missing review-thread cursor");
+                cursor = next != cursor ? next : throw new JsonException("Review-thread cursor did not advance");
                 threads = (await ThreadPagesAsync([id], cursor, ct)).Single().Threads;
                 isOpen = HasActionable(threads, viewer);
             }

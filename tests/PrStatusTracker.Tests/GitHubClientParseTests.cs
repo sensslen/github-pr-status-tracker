@@ -1,4 +1,6 @@
-﻿using PrStatusTracker.GitHub;
+﻿using System.Text.Json;
+using System.Text.Json.Nodes;
+using PrStatusTracker.GitHub;
 using PrStatusTracker.Models;
 using Xunit;
 using static PrStatusTracker.Tests.TestData;
@@ -10,11 +12,25 @@ public class GitHubClientParseTests
     private static string Fixture(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
     [Fact]
-    public void Parses_both_lists_and_dedupes_with_authored_precedence()
+    public async Task Parses_both_lists_and_dedupes_with_authored_precedence()
     {
-        var prs = GitHubClient.ParseResponse(Fixture("graphql-response.json"), Me);
+        var calls = new List<IReadOnlyList<string>>();
+        var client = new GitHubClient((args, ct) =>
+        {
+            calls.Add(args);
+            return Task.FromResult(new GhResult(0, args switch
+            {
+                _ when args.Any(a => a.StartsWith("authoredQ=", StringComparison.Ordinal)) => Fixture("graphql-response.json"),
+                _ when args.Contains("ids[]=PR_7") && args.Contains("ids[]=PR_42") && !args.Contains("ids[]=PR_101") =>
+                    Page(Pr("PR_7", Thread(resolved: false, "carol")), Pr("PR_42", Thread(resolved: false, "owen"))),
+                _ => throw new InvalidOperationException("Only authored PRs have their threads checked, in one request"),
+            }, ""));
+        });
+
+        var prs = await client.FetchPullRequestsAsync(Me);
 
         Assert.Equal(3, prs.Count);
+        Assert.Equal(2, calls.Count);
 
         var review = Assert.Single(prs, p => p.Number == 101);
         Assert.Equal("acme/widgets", review.Repo);
@@ -25,8 +41,7 @@ public class GitHubClientParseTests
         Assert.Equal(["bug", "backend"], review.Labels);
         Assert.Equal(CheckState.Pending, review.Checks);
         Assert.Equal(new DateTimeOffset(2026, 9, 14, 9, 0, 0, TimeSpan.Zero), review.HeadCommittedAt);
-        // Comment activity is only asked for on the authored search, so it is absent from a PR you review.
-        Assert.Null(review.LastCommentAt);
+        Assert.False(review.HasOpenThreads);
 
         var authored = Assert.Single(prs, p => p.Number == 7);
         Assert.Equal("owen", authored.Author);
@@ -37,9 +52,7 @@ public class GitHubClientParseTests
         Assert.Equal(new DateTimeOffset(2026, 9, 12, 8, 0, 0, TimeSpan.Zero), authored.CreatedAt);
         var r = Assert.Single(authored.LatestReviews);
         Assert.Equal(("bob", ReviewState.Approved), (r.Author, r.State));
-        // Newest of the comment and review connections wins: bob's comment is 15 minutes after carol's review.
-        Assert.Equal(new DateTimeOffset(2026, 9, 15, 9, 45, 0, TimeSpan.Zero), authored.LastCommentAt);
-        Assert.Equal("bob", authored.LastCommentBy);
+        Assert.True(authored.HasOpenThreads);
 
         // #42 appears in both search results; the authored copy (with the newer title) wins.
         var both = Assert.Single(prs, p => p.Number == 42);
@@ -48,110 +61,203 @@ public class GitHubClientParseTests
         Assert.Null(both.ReviewDecision);
         Assert.Equal(Mergeable.Conflicting, both.Mergeable);
         Assert.True(both.IsDraft);
-        // You had the last word here, so there is nothing on it you have not read.
-        Assert.Null(both.LastCommentAt);
+        Assert.False(both.HasOpenThreads);
     }
 
-    /// <summary>
-    /// One authored PR, with the three sources of comment activity written out so a test can say which of
-    /// them should win. Threads carry the resolution; issue comments and standalone review bodies cannot be
-    /// resolved at all.
-    /// </summary>
-    private static string AuthoredPr(string threads, string reviews, string comments = """
-        { "author": { "login": "alice" }, "createdAt": "2026-09-21T09:00:00Z" }
-        """) => $$"""
+    private static string Search(string updatedAt = "2026-09-21T09:00:00Z") => $$"""
         { "data": { "authored": { "nodes": [ {
-          "number": 1, "url": "u", "title": "t", "isDraft": false,
+          "id": "PR_1", "number": 1, "url": "u", "title": "t", "isDraft": false, "updatedAt": "{{updatedAt}}",
           "author": { "login": "{{Me}}" }, "repository": { "nameWithOwner": "acme/widgets" },
           "mergeable": "MERGEABLE",
           "latestReviews": { "nodes": [] },
-          "commits": { "nodes": [] },
-          "comments": { "nodes": [ {{comments}} ] },
-          "reviewThreads": { "nodes": [ {{threads}} ] },
-          "reviews": { "nodes": [ {{reviews}} ] }
+          "commits": { "nodes": [] }
         } ] } } }
         """;
 
-    private static string Thread(bool resolved, string login, string at) => $$"""
-        { "isResolved": {{(resolved ? "true" : "false")}},
-          "comments": { "nodes": [ { "author": { "login": "{{login}}" }, "createdAt": "{{at}}" } ] } }
+    private static string Threads(string threads, string? nextCursor = null) => Page(Pr("PR_1", threads, nextCursor));
+
+    private static string Page(params string[] prs) => $$"""{ "data": { "nodes": [ {{string.Join(",", prs)}} ] } }""";
+
+    private static string Pr(string id, string threads, string? nextCursor = null) => $$"""
+        { "id": "{{id}}", "reviewThreads": {
+          "pageInfo": { "hasNextPage": {{(nextCursor is null ? "false" : "true")}}, "endCursor": {{(nextCursor is null ? "null" : $"\"{nextCursor}\"")}} },
+          "nodes": [ {{threads}} ]
+        } }
         """;
 
-    private static string Review(string login, string at, string body, int inlineComments) => $$"""
-        { "author": { "login": "{{login}}" }, "createdAt": "{{at}}",
-          "bodyText": "{{body}}", "comments": { "totalCount": {{inlineComments}} } }
-        """;
-
-    private static PullRequest Parse(string json) => Assert.Single(GitHubClient.ParseResponse(json, Me));
-
-    /// <summary>
-    /// The case that prompted this: every thread resolved, so the PR is settled even though the reviews that
-    /// carried those threads are recent. Reporting them made a quiet PR claim it wanted something.
-    /// </summary>
-    [Fact]
-    public void A_conversation_you_have_resolved_is_not_waiting_on_you()
+    private static string Thread(bool resolved, string login, string? pendingReplyBy = null)
     {
-        var pr = Parse(AuthoredPr(
-            threads: string.Join(",", Thread(resolved: true, "alice", "2026-09-21T12:00:00Z"),
-                                      Thread(resolved: true, "bob", "2026-09-21T13:00:00Z")),
-            reviews: Review("alice", "2026-09-21T13:00:00Z", "Actionable comments posted: 1", inlineComments: 1),
-            comments: ""));
+        var pending = pendingReplyBy is null ? "" : $$""", { "author": { "login": "{{pendingReplyBy}}" }, "state": "PENDING" }""";
+        return $$"""
+            { "isResolved": {{(resolved ? "true" : "false")}}, "comments": { "nodes": [
+              { "author": { "login": "{{login}}" }, "state": "SUBMITTED" }{{pending}}
+            ] } }
+            """;
+    }
 
-        Assert.Null(pr.LastCommentAt);
+    /// <summary>Answers the search with <paramref name="searches"/> and each thread query with the next of <paramref name="pages"/>.</summary>
+    private static GitHubClient Client(List<IReadOnlyList<string>> calls, Queue<string> searches, Queue<string> pages) =>
+        new((args, ct) =>
+        {
+            calls.Add(args);
+            var search = args.Any(a => a.StartsWith("authoredQ=", StringComparison.Ordinal));
+            return Task.FromResult(new GhResult(0, search ? searches.Dequeue() : pages.Dequeue(), ""));
+        });
+
+    private static async Task<PullRequest> Fetch(params string[] pages)
+    {
+        var client = Client([], new Queue<string>([Search()]), new Queue<string>(pages));
+        return Assert.Single(await client.FetchPullRequestsAsync(Me));
     }
 
     [Fact]
-    public void An_open_thread_still_counts_even_beside_resolved_ones()
+    public async Task A_conversation_you_have_resolved_is_not_waiting_on_you()
     {
-        var pr = Parse(AuthoredPr(
-            threads: string.Join(",", Thread(resolved: true, "alice", "2026-09-21T14:00:00Z"),
-                                      Thread(resolved: false, "bob", "2026-09-21T12:00:00Z")),
-            reviews: "",
-            comments: ""));
+        var pr = await Fetch(Threads(string.Join(",", Thread(resolved: true, "alice"), Thread(resolved: true, "bob"))));
 
-        // The resolved thread is newer, and is still ignored: what matters is the newest thing left open.
-        Assert.Equal(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero), pr.LastCommentAt);
-        Assert.Equal("bob", pr.LastCommentBy);
+        Assert.False(pr.HasOpenThreads);
     }
 
-    /// <summary>A body posted with inline comments summarises them; the thread is what carries resolution.</summary>
+    [Fact]
+    public async Task An_open_thread_still_counts_even_beside_resolved_ones()
+    {
+        var pr = await Fetch(Threads(string.Join(",", Thread(resolved: true, "alice"), Thread(resolved: false, "bob"))));
+
+        Assert.True(pr.HasOpenThreads);
+    }
+
     [Theory]
-    [InlineData(1, null)]   // alongside inline comments: resolved with them
-    [InlineData(0, "bob")]  // standalone commentary: nothing to resolve, so it stands
-    public void A_review_body_counts_only_when_it_is_standalone(int inlineComments, string? expectedBy)
+    [InlineData("owen", false)]
+    [InlineData("OWEN", false)]
+    [InlineData("alice", true)]
+    [InlineData("coderabbitai[bot]", true)]
+    public async Task Open_threads_awaiting_the_author_count_including_bots(string login, bool expected)
     {
-        var pr = Parse(AuthoredPr(
-            threads: Thread(resolved: true, "bob", "2026-09-21T12:00:00Z"),
-            reviews: Review("bob", "2026-09-21T13:00:00Z", "Please rename this", inlineComments),
-            comments: ""));
+        var pr = await Fetch(Threads(Thread(resolved: false, login)));
 
-        Assert.Equal(expectedBy, pr.LastCommentBy);
+        Assert.Equal(expected, pr.HasOpenThreads);
     }
 
     [Fact]
-    public void An_issue_comment_can_never_be_resolved_so_it_always_counts()
+    public async Task An_author_reply_does_not_hide_another_actionable_thread()
     {
-        var pr = Parse(AuthoredPr(threads: Thread(resolved: true, "bob", "2026-09-21T13:00:00Z"), reviews: ""));
+        var pr = await Fetch(Threads(string.Join(",", Thread(resolved: false, Other), Thread(resolved: false, Me))));
 
-        Assert.Equal("alice", pr.LastCommentBy);
+        Assert.True(pr.HasOpenThreads);
     }
 
-    /// <summary>Whichever source carries it, your own last word means there is nothing left unread.</summary>
     [Fact]
-    public void Your_own_reply_in_an_open_thread_still_suppresses_it()
+    public async Task A_pending_reply_leaves_the_thread_waiting_on_you()
     {
-        var pr = Parse(AuthoredPr(
-            threads: Thread(resolved: false, Me, "2026-09-21T13:00:00Z"),
-            reviews: "",
-            comments: ""));
+        var pr = await Fetch(Threads(Thread(resolved: false, Other, pendingReplyBy: Me)));
 
-        Assert.Null(pr.LastCommentAt);
+        Assert.True(pr.HasOpenThreads);
+    }
+
+    [Theory]
+    [InlineData("""{"data":{"nodes":[null]}}""")]
+    [InlineData("""{"data":{"nodes":[{"id":"PR_1"}]}}""")]
+    public async Task Missing_threads_fail_the_poll_rather_than_reading_as_quiet(string page)
+    {
+        var client = Client([], new Queue<string>([Search()]), new Queue<string>([page]));
+
+        await Assert.ThrowsAsync<JsonException>(() => client.FetchPullRequestsAsync(Me));
+    }
+
+    public class Reuse
+    {
+        [Fact]
+        public async Task A_quiet_pr_is_not_asked_again_until_it_changes()
+        {
+            var calls = new List<IReadOnlyList<string>>();
+            var client = Client(calls,
+                new Queue<string>([Search("2026-09-21T09:00:00Z"), Search("2026-09-21T09:00:00Z"), Search("2026-09-21T10:00:00Z")]),
+                new Queue<string>([Threads(Thread(resolved: true, Other)), Threads(Thread(resolved: false, Other))]));
+
+            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.Equal(3, calls.Count);
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.Equal(5, calls.Count);
+        }
+
+        [Fact]
+        public async Task Resolving_a_thread_clears_it_without_new_activity()
+        {
+            var client = Client([], new Queue<string>([Search(), Search()]),
+                new Queue<string>([Threads(Thread(resolved: false, Other)), Threads(Thread(resolved: true, Other))]));
+
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+        }
+
+        [Fact]
+        public async Task Reopening_a_thread_brings_it_back_once_the_quiet_answer_expires()
+        {
+            var calls = new List<IReadOnlyList<string>>();
+            var client = Client(calls, new Queue<string>(Enumerable.Repeat(Search(), GitHubClient.QuietReuses + 2)),
+                new Queue<string>([Threads(Thread(resolved: true, Other)), Threads(Thread(resolved: false, Other))]));
+
+            for (var poll = 0; poll <= GitHubClient.QuietReuses; poll++)
+            {
+                Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            }
+
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.Equal(GitHubClient.QuietReuses + 4, calls.Count);
+        }
+    }
+
+    public class Paging
+    {
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Fetches_later_thread_pages_before_claiming_there_is_no_work(bool actionable)
+        {
+            var calls = new List<IReadOnlyList<string>>();
+            var client = Client(calls, new Queue<string>([Search()]), new Queue<string>(
+            [
+                Threads(string.Join(",", Enumerable.Repeat(Thread(resolved: true, Other), 50)), nextCursor: "page1"),
+                Threads("", nextCursor: "page2"),
+                Threads(Thread(!actionable, Other)),
+            ]));
+
+            var pr = Assert.Single(await client.FetchPullRequestsAsync(Me));
+
+            Assert.Equal(actionable, pr.HasOpenThreads);
+            Assert.Equal(4, calls.Count);
+            Assert.Contains("ids[]=PR_1", calls[1]);
+            Assert.DoesNotContain(calls[1], a => a.StartsWith("cursor=", StringComparison.Ordinal));
+            Assert.Contains("cursor=page1", calls[2]);
+            Assert.Contains("cursor=page2", calls[3]);
+        }
+
+        [Fact]
+        public async Task Stops_paging_once_an_actionable_thread_is_found()
+        {
+            var calls = new List<IReadOnlyList<string>>();
+            var client = Client(calls, new Queue<string>([Search()]),
+                new Queue<string>([Threads(Thread(resolved: false, Other), nextCursor: "page1")]));
+
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.Equal(2, calls.Count);
+        }
+
+        [Fact]
+        public async Task A_failed_thread_page_fails_the_poll()
+        {
+            var client = Client([], new Queue<string>([Search()]),
+                new Queue<string>([Threads("", nextCursor: "page1"), """{"errors":[{"message":"boom"}]}"""]));
+
+            await Assert.ThrowsAsync<GhException>(() => client.FetchPullRequestsAsync(Me));
+        }
     }
 
     [Fact]
     public void Surfaces_graphql_errors()
     {
-        var ex = Assert.Throws<GhException>(() => GitHubClient.ParseResponse("""{"errors":[{"message":"boom"}]}""", Me));
+        var ex = Assert.Throws<GhException>(() => GitHubClient.ParseResponse("""{"errors":[{"message":"boom"}]}"""));
         Assert.Contains("boom", ex.Message);
     }
 }

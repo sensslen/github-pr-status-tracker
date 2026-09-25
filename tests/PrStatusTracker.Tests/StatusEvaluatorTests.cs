@@ -189,7 +189,7 @@ public class StatusEvaluatorTests
     [InlineData(PrCallout.ChecksFailing, true)]
     [InlineData(PrCallout.MergeConflict, true)]
     [InlineData(PrCallout.ChangesRequested, true)]
-    [InlineData(PrCallout.NewComments, true)]
+    [InlineData(PrCallout.OpenThreads, true)]
     [InlineData(PrCallout.NoReviewers, true)]
     public void IsWork_is_every_callout_but_a_pr_you_can_just_merge(PrCallout callout, bool expected) =>
         Assert.Equal(expected, callout.IsWork());

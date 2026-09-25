@@ -16,7 +16,7 @@ public enum PrCallout
     ChecksFailing,
     MergeConflict,
     ChangesRequested,
-    NewComments,
+    OpenThreads,
     NoReviewers,
 }
 
@@ -83,8 +83,7 @@ public static class PrStatusExtensions
         status.Bucket() == PrBucket.NeedsYou || status.Callout() != PrCallout.None;
 
     /// <summary>
-    /// What a PR of yours is calling for, from its status alone. <see cref="PrCallout.NewComments"/> is not
-    /// reachable here — it depends on what you have already read, which the status knows nothing about.
+    /// Thread callouts stay separate from status so they do not produce status-change notifications.
     /// A conflicted PR is never "ready", approved and green or not: the merge button will not work until it
     /// has been rebased, so it is called out as the conflict it is.
     /// </summary>
@@ -99,19 +98,17 @@ public static class PrStatusExtensions
     };
 
     /// <summary>
-    /// Everything a PR is calling for, most pressing first. <paramref name="hasNewComments"/> is the one part
-    /// no status can supply — it depends on what you have already read — so it is passed in, and it comes
-    /// second: a stale review comment matters less than failing CI.
+    /// The status callout leads so an open thread cannot hide failing CI or a merge conflict.
     /// </summary>
-    public static IReadOnlyList<PrCallout> Callouts(this PrStatus status, bool hasNewComments) =>
-        (status.Callout(), hasNewComments) switch
+    public static IReadOnlyList<PrCallout> Callouts(this PrStatus status, bool hasOpenThreads) =>
+        (status.Callout(), hasOpenThreads) switch
         {
             // Built once per row on every rebuild of a list that does not virtualise, and most rows want
             // nothing, so the quiet case has to cost no allocation: `[]` lowers to Array.Empty.
             (PrCallout.None, false) => [],
-            (PrCallout.None, true) => [PrCallout.NewComments],
+            (PrCallout.None, true) => [PrCallout.OpenThreads],
             (var fromStatus, false) => [fromStatus],
-            (var fromStatus, _) => [fromStatus, PrCallout.NewComments],
+            (var fromStatus, _) => [fromStatus, PrCallout.OpenThreads],
         };
 
     /// <summary>
@@ -164,7 +161,7 @@ public static class PrStatusExtensions
         PrCallout.ChecksFailing => "CI failing",
         PrCallout.MergeConflict => "conflicted",
         PrCallout.ChangesRequested => "changes requested",
-        PrCallout.NewComments => "with new comments",
+        PrCallout.OpenThreads => "with open threads",
         PrCallout.NoReviewers => "without reviewers",
         _ => callout.ToString(),
     };

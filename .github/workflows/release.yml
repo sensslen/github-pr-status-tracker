@@ -124,6 +124,10 @@ jobs:
             Install the [GitHub CLI](https://cli.github.com/) and run `gh auth login` once. The app
             has no credentials of its own and reads GitHub through `gh`.
 
+            The app needs `gh` 2.21.0 or later. If polling fails with an error about a missing
+            `$ids` variable, update it: `winget upgrade GitHub.cli` on Windows, `brew upgrade gh`
+            on macOS, or the installer from the GitHub CLI site.
+
             ### Windows
 
             `PrStatusTracker-*-win-x64-setup.exe` installs for the current user, no administrator

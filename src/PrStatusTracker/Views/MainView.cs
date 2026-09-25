@@ -85,16 +85,10 @@ internal static class ViewHelpers
         PrCallout.ReadyToMerge => ReadyBrush,
         PrCallout.ChecksFailing or PrCallout.MergeConflict => FailBrush,
         PrCallout.ChangesRequested or PrCallout.NoReviewers => NeedsYouBrush,
-        PrCallout.NewComments => AccentBrush,
+        PrCallout.OpenThreads => AccentBrush,
         _ => BucketBrush(item.Status.Bucket()),
     };
 
-    /// <summary>
-    /// Flags unresolved comments left since you last opened the PR; clicking the row clears it. Whether it is
-    /// wanted is the caller's to say, because a row whose pill already reads "New comments" does not need the
-    /// same thing said twice. Always built, and collapsed out of the layout when it is not wanted, so the row
-    /// stays a single declarative expression like every other row here.
-    /// </summary>
     public static TextBlock CommentMarker(PrItemViewModel item, bool visible)
     {
         var label = new TextBlock().Text("💬").FontSize(11).FontWeight(FontWeight.SemiBold)
@@ -102,7 +96,7 @@ internal static class ViewHelpers
             .IsVisible(visible);
         if (visible)
         {
-            ToolTip.SetTip(label, item.NewCommentsTip);
+            ToolTip.SetTip(label, item.OpenThreadsTip);
         }
 
         return label;

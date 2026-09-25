@@ -11,11 +11,27 @@ public interface IGitHubClient
 }
 
 /// <summary>Fetches PR data through `gh api graphql` and maps it to <see cref="PullRequest"/>.</summary>
-public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
+public sealed class GitHubClient : IGitHubClient
 {
+    private readonly Func<IReadOnlyList<string>, CancellationToken, Task<GhResult>> _run;
+
+    /// <summary>
+    /// How many more polls a "nothing waiting" answer is reused for. Reopening a thread is not guaranteed to move
+    /// updatedAt, so the answer has to expire for a reopened thread to come back.
+    /// </summary>
+    internal const int QuietReuses = 4;
+
+    private Dictionary<string, Quiet> _quiet = [];
+
+    private sealed record Quiet(DateTimeOffset UpdatedAt, int ReusesLeft);
+
+    public GitHubClient(GhCommandRunner gh) : this(gh.RunAsync) { }
+
+    internal GitHubClient(Func<IReadOnlyList<string>, CancellationToken, Task<GhResult>> run) => _run = run;
+
     public async Task<string> GetViewerLoginAsync(CancellationToken ct = default)
     {
-        var result = await gh.RunAsync(["api", "user", "--jq", ".login"], ct);
+        var result = await _run(["api", "user", "--jq", ".login"], ct);
         var login = result.StdOut.Trim();
         if (string.IsNullOrEmpty(login))
         {
@@ -27,7 +43,7 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
 
     public async Task<IReadOnlyList<PullRequest>> FetchPullRequestsAsync(string login, CancellationToken ct = default)
     {
-        var result = await gh.RunAsync(
+        var result = await _run(
         [
             "api", "graphql",
             "-f", $"query={Queries.PullRequests}",
@@ -36,10 +52,86 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
             "-F", $"authoredQ={Queries.Authored(login)}",
         ], ct);
 
-        return ParseResponse(result.StdOut, login);
+        var data = ParseData(result.StdOut);
+        var updatedAt = (data[Queries.AuthoredAlias]?["nodes"]?.AsArray() ?? [])
+            .Where(pr => pr?["id"] is not null)
+            .ToDictionary(
+                pr => pr!["id"]!.GetValue<string>(),
+                pr => pr!["updatedAt"]?.GetValue<DateTimeOffset>() ?? DateTimeOffset.MinValue);
+
+        var quiet = new Dictionary<string, Quiet>();
+        var ask = new List<string>();
+        foreach (var (id, at) in updatedAt)
+        {
+            if (_quiet.TryGetValue(id, out var q) && q.UpdatedAt == at && q.ReusesLeft > 0)
+            {
+                quiet[id] = q with { ReusesLeft = q.ReusesLeft - 1 };
+            }
+            else
+            {
+                ask.Add(id);
+            }
+        }
+
+        var open = new HashSet<string>();
+        foreach (var (id, isOpen) in await CheckThreadsAsync(ask, login, ct))
+        {
+            if (isOpen)
+            {
+                open.Add(id);
+            }
+            else
+            {
+                quiet[id] = new Quiet(updatedAt[id], QuietReuses);
+            }
+        }
+
+        _quiet = quiet;
+        return MapResponse(data, open);
     }
 
-    internal static IReadOnlyList<PullRequest> ParseResponse(string json, string viewer)
+    private async Task<List<(string Id, bool Open)>> CheckThreadsAsync(IReadOnlyList<string> ids, string viewer, CancellationToken ct)
+    {
+        var results = new List<(string, bool)>();
+        if (ids.Count == 0)
+        {
+            return results;
+        }
+
+        foreach (var (id, first) in await ThreadPagesAsync(ids, null, ct))
+        {
+            var threads = first;
+            var isOpen = HasActionable(threads, viewer);
+            while (!isOpen && threads["pageInfo"]?["hasNextPage"]?.GetValue<bool>() == true)
+            {
+                var cursor = threads["pageInfo"]?["endCursor"]?.GetValue<string>()
+                    ?? throw new JsonException("Missing review-thread cursor");
+                threads = (await ThreadPagesAsync([id], cursor, ct)).Single().Threads;
+                isOpen = HasActionable(threads, viewer);
+            }
+
+            results.Add((id, isOpen));
+        }
+
+        return results;
+    }
+
+    private async Task<IEnumerable<(string Id, JsonNode Threads)>> ThreadPagesAsync(
+        IReadOnlyList<string> ids, string? cursor, CancellationToken ct)
+    {
+        List<string> args = ["api", "graphql", "-f", $"query={Queries.ReviewThreads}", .. ids.SelectMany(id => new[] { "-f", $"ids[]={id}" })];
+        if (cursor is not null)
+        {
+            args.AddRange(["-f", $"cursor={cursor}"]);
+        }
+
+        var nodes = ParseData((await _run(args, ct)).StdOut)["nodes"]?.AsArray() ?? throw new JsonException("Missing review threads");
+        return nodes.Select(pr => (
+            pr?["id"]?.GetValue<string>() ?? throw new JsonException("Missing pull request"),
+            pr["reviewThreads"] is { } threads && threads["nodes"] is JsonArray ? threads : throw new JsonException("Missing review threads")));
+    }
+
+    private static JsonNode ParseData(string json)
     {
         var root = JsonNode.Parse(json) ?? throw new JsonException("empty response");
         if (root["errors"] is JsonArray { Count: > 0 } errors)
@@ -48,11 +140,16 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
             throw new GhException(kind, "GraphQL error: " + errors[0]?["message"]?.GetValue<string>());
         }
 
-        var data = root["data"] ?? throw new JsonException("no data in response");
+        return root["data"] ?? throw new JsonException("no data in response");
+    }
 
+    internal static IReadOnlyList<PullRequest> ParseResponse(string json) => MapResponse(ParseData(json), new HashSet<string>());
+
+    private static IReadOnlyList<PullRequest> MapResponse(JsonNode data, IReadOnlySet<string> withOpenThreads)
+    {
         // Authored takes precedence when a PR appears in more than one list.
         var byKey = new Dictionary<string, PullRequest>();
-        foreach (var (alias, tracksComments) in Queries.Aliases)
+        foreach (var alias in Queries.Aliases)
         {
             if (data[alias]?["nodes"] is not JsonArray nodes)
             {
@@ -66,73 +163,24 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
                     continue; // non-PR search hits have no fields
                 }
 
-                var pr = MapPullRequest(node, viewer, tracksComments);
+                var pr = MapPullRequest(node, withOpenThreads);
                 byKey[pr.Key] = pr;
             }
         }
         return [.. byKey.Values];
     }
 
-    /// <summary>
-    /// The newest <b>unresolved</b> thing anyone said on this PR, ignoring your own. If the newest of all is
-    /// yours, nothing is reported: you were the last to speak, so there is nothing here you have not read.
-    /// <para>
-    /// Three sources, each for a reason. Issue comments can never be resolved, so they always count. Inline
-    /// conversation counts only while its thread is open — a resolved thread is a finished conversation,
-    /// whoever spoke in it last. A review's own body counts only when it is standalone commentary: a body
-    /// posted alongside inline comments is a summary of them, and they are what carries the resolution, so
-    /// counting it would keep resurrecting a discussion you have already settled.
-    /// </para>
-    /// </summary>
-    private static (DateTimeOffset At, string By)? MapLastComment(JsonNode n, string viewer)
-    {
-        List<(DateTimeOffset At, string By)> said = [];
-        void Add(JsonNode? c)
-        {
-            if (c?["createdAt"]?.GetValue<DateTimeOffset?>() is { } at
-                && c["author"]?["login"]?.GetValue<string>() is { } by)
-            {
-                said.Add((at, by));
-            }
-        }
+    private static bool HasActionable(JsonNode threads, string viewer) =>
+        threads["nodes"] is JsonArray nodes && nodes.Any(thread => IsActionable(thread, viewer));
 
-        foreach (var c in n["comments"]?["nodes"]?.AsArray() ?? [])
-        {
-            Add(c);
-        }
+    /// <summary>A pending comment is yours and unsent, so the thread is still waiting on whoever wrote before it.</summary>
+    private static bool IsActionable(JsonNode? thread, string viewer) =>
+        thread?["isResolved"]?.GetValue<bool>() == false
+        && thread["comments"]?["nodes"]?.AsArray()
+            .LastOrDefault(c => c?["state"]?.GetValue<string>() != "PENDING")?["author"]?["login"]?.GetValue<string>() is { } by
+        && !string.Equals(by, viewer, StringComparison.OrdinalIgnoreCase);
 
-        foreach (var thread in n["reviewThreads"]?["nodes"]?.AsArray() ?? [])
-        {
-            if (thread?["isResolved"]?.GetValue<bool>() != false)
-            {
-                continue; // resolved, or a shape we cannot read: either way, not waiting on you
-            }
-
-            foreach (var c in thread["comments"]?["nodes"]?.AsArray() ?? [])
-            {
-                Add(c);
-            }
-        }
-
-        foreach (var review in n["reviews"]?["nodes"]?.AsArray() ?? [])
-        {
-            var standalone = review?["comments"]?["totalCount"]?.GetValue<int>() == 0;
-            if (standalone && !string.IsNullOrWhiteSpace(review?["bodyText"]?.GetValue<string>()))
-            {
-                Add(review);
-            }
-        }
-
-        if (said.Count == 0)
-        {
-            return null;
-        }
-
-        var last = said.MaxBy(s => s.At);
-        return string.Equals(last.By, viewer, StringComparison.OrdinalIgnoreCase) ? null : last;
-    }
-
-    private static PullRequest MapPullRequest(JsonNode n, string viewer, bool tracksComments)
+    private static PullRequest MapPullRequest(JsonNode n, IReadOnlySet<string> withOpenThreads)
     {
         var reviewers = new List<string>();
         foreach (var r in n["reviewRequests"]?["nodes"]?.AsArray() ?? [])
@@ -165,7 +213,6 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
 
         var commit = n["commits"]?["nodes"]?.AsArray().FirstOrDefault()?["commit"];
         var rollup = commit?["statusCheckRollup"]?["state"]?.GetValue<string>();
-        var lastComment = tracksComments ? MapLastComment(n, viewer) : null;
 
         return new PullRequest(
             Repo: n["repository"]?["nameWithOwner"]?.GetValue<string>() ?? "?",
@@ -194,8 +241,7 @@ public sealed class GitHubClient(GhCommandRunner gh) : IGitHubClient
                 "FAILURE" or "ERROR" => CheckState.Failure,
                 _ => CheckState.Pending, // PENDING, EXPECTED
             },
-            LastCommentAt: lastComment?.At,
-            LastCommentBy: lastComment?.By);
+            HasOpenThreads: n["id"]?.GetValue<string>() is { } id && withOpenThreads.Contains(id));
     }
 
     private static TEnum ParseEnum<TEnum>(JsonNode? node, TEnum fallback) where TEnum : struct, Enum

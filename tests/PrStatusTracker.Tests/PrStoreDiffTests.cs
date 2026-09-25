@@ -23,36 +23,39 @@ public class PrStoreDiffTests
             c => { Assert.Equal(PrChangeKind.Appeared, c.Kind); Assert.Equal(4, c.Current.Pr.Number); Assert.Null(c.PreviousStatus); });
     }
 
-    /// <summary>
-    /// A comment changes no status, so the diff is empty — but it must still land, or the 💬 marker would wait
-    /// for some unrelated change before appearing. Guards the short-circuit in Apply, not Diff.
-    /// </summary>
-    [Fact]
-    public void A_new_comment_alone_still_refreshes_the_snapshot()
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Thread_resolution_and_reopening_refresh_without_status_notifications(bool before, bool after)
     {
-        var store = TempStore(out _);
-        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+        var store = TempStore(out var path);
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, openThreads: before)]);
 
         var updates = 0;
+        var notifications = 0;
         store.Updated += () => updates++;
+        store.Changed += _ => notifications++;
 
-        // Same status, same updatedAt, same checks: only the comment moved.
-        var changes = store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0.AddMinutes(5))]);
+        var changes = store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, openThreads: after)]);
 
         Assert.Empty(changes);
         Assert.Equal(1, updates);
-        Assert.Equal(T0.AddMinutes(5), Assert.Single(store.Current).Pr.LastCommentAt);
+        Assert.Equal(0, notifications);
+        Assert.Equal(after, Assert.Single(store.Current).Pr.HasOpenThreads);
+        var reopened = new PrStore(new JsonFileStore<List<TrackedPr>>(path));
+        Assert.Equal(after, Assert.Single(reopened.Current).Pr.HasOpenThreads);
+        File.Delete(path);
     }
 
     [Fact]
     public void A_poll_that_changes_nothing_at_all_is_still_silent()
     {
         var store = TempStore(out _);
-        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, openThreads: true)]);
 
         var updates = 0;
         store.Updated += () => updates++;
-        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, lastComment: T0)]);
+        store.Apply([Tracked(PrStatus.AwaitingReview, author: Me, openThreads: true)]);
 
         Assert.Equal(0, updates);
     }
@@ -142,7 +145,8 @@ public class PrStoreDiffTests
             [{"Pr":{"Repo":"org/repo","Number":1,"Title":"Old","Url":"https://github.com/org/repo/pull/1","IsDraft":false,
               "Author":"alice","CreatedAt":"2026-09-01T00:00:00+00:00","UpdatedAt":"2026-09-02T00:00:00+00:00",
               "ReviewDecision":null,"Mergeable":"Mergeable","RequestedReviewers":["owen"],"LatestReviews":[],
-              "HeadCommittedAt":null,"Checks":"Success"},"Status":"AwaitingYourReview"}]
+              "HeadCommittedAt":null,"Checks":"Success","LastCommentAt":"2026-09-02T00:00:00+00:00",
+              "LastCommentBy":"bob"},"Status":"AwaitingYourReview"}]
             """);
 
         var store = new PrStore(new JsonFileStore<List<TrackedPr>>(path));
@@ -152,6 +156,7 @@ public class PrStoreDiffTests
         Assert.Empty(pr.Labels);
         Assert.Equal(["owen"], pr.RequestedReviewers);
         Assert.Equal(0, pr.Additions);
+        Assert.False(pr.HasOpenThreads);
         File.Delete(path);
     }
 

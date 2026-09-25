@@ -10,7 +10,7 @@ public class PrGroupViewModelTests
 {
     private static PrItemViewModel Item(string author, int number, string repo = "org/repo",
         PrStatus status = PrStatus.AwaitingReview) =>
-        new(new(Pr(number: number, author: author, repo: repo), status), isStarred: false, hasNewComments: false);
+        new(new(Pr(number: number, author: author, repo: repo), status), isStarred: false);
 
     private static PrItemViewModel TeamOnly(int number, string repo = "org/repo") =>
         Item(Other, number, repo, PrStatus.RequestedViaTeam);

@@ -10,7 +10,7 @@ using PrStatusTracker.Platform;
 
 namespace PrStatusTracker.ViewModels;
 
-public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred, bool hasNewComments)
+public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 {
     public PullRequest Pr { get; } = tracked.Pr;
     public string Title { get; } = tracked.Pr.Title;
@@ -28,33 +28,23 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred, bool hasN
     /// <summary>Marked by the user as one they are working through; starred rows sort to the top of their bucket.</summary>
     public bool IsStarred { get; } = isStarred;
 
-    /// <summary>Someone has said something here since you last opened it. Only ever true for your own PRs.</summary>
-    public bool HasNewComments { get; } = hasNewComments;
+    public bool HasOpenThreads => Callouts.Contains(PrCallout.OpenThreads);
 
     /// <summary>
     /// Everything this PR is calling for, most pressing first. Empty for a PR that needs nothing from you,
     /// and for every PR that is not yours — those are what the other two tabs are for.
     /// </summary>
-    public IReadOnlyList<PrCallout> Callouts { get; } = tracked.Status.Callouts(hasNewComments);
+    public IReadOnlyList<PrCallout> Callouts { get; } = tracked.Status.Callouts(tracked.Pr.HasOpenThreads);
 
     /// <summary>The one the row sorts and colours by. None is the enum's default, so an empty list gives it.</summary>
     public PrCallout Callout => Callouts.FirstOrDefault();
 
-    /// <summary>
-    /// What the pill reads. Normally the status, but a quiet status is overruled by unread comments: a PR
-    /// whose pill said "Awaiting review" while the tab counted it as wanting something was telling you two
-    /// different things at once. Where the status already carries a callout of its own, that still leads —
-    /// failing CI outranks a comment — and the 💬 marker carries the rest.
-    /// </summary>
-    public string StatusLabel { get; } = tracked.Status.Callouts(hasNewComments).FirstOrDefault() == PrCallout.NewComments
-        ? "New comments"
-        : tracked.Status.Label();
+    public string StatusLabel => Callout == PrCallout.OpenThreads ? "Open threads" : Status.Label();
 
     public bool NeedsAttention => Callouts.Count > 0;
 
-    /// <summary>Projected here like every other row string, so the view never reads the raw PR.</summary>
-    public string NewCommentsTip { get; } = hasNewComments
-        ? $"New comments since you last opened this — latest from {tracked.Pr.LastCommentBy}"
+    public string OpenThreadsTip => HasOpenThreads
+        ? "Unresolved review threads awaiting your reply"
         : string.Empty;
 
     private static string BuildDetails(PullRequest pr)
@@ -200,7 +190,7 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         Attention = Bucket == PrBucket.YourPrs ? Summarise(Items) : string.Empty;
     }
 
-    /// <summary>Counts each callout a row carries, so a failing PR with unread comments is named under both.</summary>
+    /// <summary>A failing PR with open threads must be counted under both callouts.</summary>
     internal static string Summarise(IEnumerable<PrItemViewModel> items) =>
         string.Join(" · ", items.SelectMany(i => i.Callouts)
             .GroupBy(c => c)
@@ -215,7 +205,6 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly PrStore _store;
     private readonly StarStore _stars;
-    private readonly CommentSeenStore _seen;
     private readonly PollingService _poller;
     private readonly NotificationService _notifications;
     private readonly AppSettings _settings;
@@ -233,13 +222,12 @@ public sealed partial class MainViewModel : ObservableObject
     private int _attentionCount;
     private string? _localMessage; // shown in the banner when there is no poll error
 
-    public MainViewModel(PrStore store, StarStore stars, CommentSeenStore seen, PollingService poller,
+    public MainViewModel(PrStore store, StarStore stars, PollingService poller,
         NotificationService notifications, AppSettings settings, JsonFileStore<AppSettings> settingsFile,
         IAutoStart autoStart, GhCommandRunner gh, UpdateService updates)
     {
         _store = store;
         _stars = stars;
-        _seen = seen;
         _poller = poller;
         _notifications = notifications;
         _settings = settings;
@@ -258,7 +246,6 @@ public sealed partial class MainViewModel : ObservableObject
         NeedsYou.HideTeamOnly = settings.HideTeamOnlyRequests;
         store.Updated += () => Dispatcher.UIThread.Post(RefreshGroups);
         stars.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
-        seen.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
         poller.StateChanged += () => Dispatcher.UIThread.Post(RefreshPollerState);
         notifications.HistoryChanged += () => Dispatcher.UIThread.Post(RefreshNotifications);
 
@@ -403,12 +390,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public Task RefreshAsync() => _poller.RefreshNowAsync();
 
-    /// <summary>Opening a PR is what counts as reading it: its comments stop being new from here on.</summary>
-    public void OpenPr(PrItemViewModel item)
-    {
-        _seen.MarkRead(item.Pr.Key, item.Pr.LastCommentAt);
-        Browser.Open(item.Url);
-    }
+    public static void OpenPr(PrItemViewModel item) => Browser.Open(item.Url);
 
     /// <summary>The store raises its own change event, which re-sorts and rebuilds the rows.</summary>
     public void ToggleStar(PrItemViewModel item) => _stars.Toggle(item.Pr.Key);
@@ -486,7 +468,7 @@ public sealed partial class MainViewModel : ObservableObject
         // most pressing callout first, then oldest PR first, so the ones that have waited longest come to the
         // top. Only your own PRs carry callouts, so for the two review tabs this is the old star/age order.
         var items = _store.Current
-            .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key), _seen.HasUnread(t.Key, t.Pr.LastCommentAt)))
+            .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key)))
             .OrderByDescending(i => i.IsStarred)
             .ThenByDescending(i => i.NeedsAttention)
             .ThenBy(i => i.Callout)
@@ -506,7 +488,7 @@ public sealed partial class MainViewModel : ObservableObject
         // tab now, so the count that mattered — how many of them want something — has to be spelled out here
         // rather than read off the tab sizes.
         _readyCount = items.Count(i => i.Callout == PrCallout.ReadyToMerge);
-        _attentionCount = items.Count(i => i.Callout.IsWork());
+        _attentionCount = items.Count(i => i.Callouts.Any(c => c.IsWork()));
         var parts = new List<string>();
         if (_readyCount > 0)
         {

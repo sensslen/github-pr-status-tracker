@@ -57,7 +57,6 @@ src/PrStatusTracker/
     PrFilter.cs               // main-window filter rules (text + author/label/repo)
     PrStore.cs                // snapshot + diffing
     StarStore.cs              // the PRs you starred, persisted
-    CommentSeenStore.cs       // how far you have read each of your own PRs, persisted
     PollingService.cs
     UpdateService.cs            // release check + installer handoff, both through `gh`
     JsonFileStore.cs          // load/save for settings, snapshot, notifications
@@ -107,9 +106,9 @@ holds the user's credentials, refreshes them, and respects their enterprise host
   **rate limited / network error** (message text). Each maps to a specific banner in the
   window rather than a generic error.
 
-### The one query
+### The queries
 
-A single `gh api graphql` call fetches every list we need, using three `search` aliases in
+One `gh api graphql` call fetches every list we need, using three `search` aliases in
 one document. The viewer's login is fetched once at startup (`gh api user`) and cached,
 since GraphQL search does not accept `@me`.
 
@@ -117,11 +116,11 @@ since GraphQL search does not accept `@me`.
 query($reviewQ: String!, $reviewedQ: String!, $authoredQ: String!) {
   review:   search(query: $reviewQ,   type: ISSUE, first: 50) { nodes { ...PrFields } }
   reviewed: search(query: $reviewedQ, type: ISSUE, first: 50) { nodes { ...PrFields } }
-  authored: search(query: $authoredQ, type: ISSUE, first: 50) { nodes { ...PrFields ...CommentFields } }
+  authored: search(query: $authoredQ, type: ISSUE, first: 50) { nodes { ...PrFields } }
 }
 
 fragment PrFields on PullRequest {
-  number title url isDraft createdAt updatedAt additions deletions
+  id number title url isDraft createdAt updatedAt additions deletions
   author { login }
   repository { nameWithOwner }
   labels(first: 10) { nodes { name } }
@@ -138,13 +137,22 @@ fragment PrFields on PullRequest {
   } } }
 }
 
-fragment CommentFields on PullRequest {
-  comments(last: 1) { nodes { author { login } createdAt } }
-  reviewThreads(last: 20) { nodes {
-    isResolved
-    comments(last: 1) { nodes { author { login } createdAt } }
+```
+
+Review threads for authored PRs come from a second query, one request for all of them:
+
+```graphql
+query($ids: [ID!]!, $cursor: String) {
+  nodes(ids: $ids) { ... on PullRequest {
+    id
+    reviewThreads(first: 50, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        isResolved
+        comments(last: 5) { nodes { author { login } state } }
+      }
+    }
   } }
-  reviews(last: 5) { nodes { author { login } createdAt bodyText comments { totalCount } } }
 }
 ```
 
@@ -157,32 +165,27 @@ with
 `reviewed-by:` is there because GitHub removes a PR from `review-requested:` the moment you
 submit a review; without it, approving a PR would look like the PR closing.
 
-`CommentFields` is asked for on the authored search alone: only your own PRs track comments as
-read or unread (section 6), so paying for these three times over would fill a column nothing
-reads. Which searches carry it is declared beside the query, on `Queries.Aliases`, and handed to
-the parser — rather than inferred from which fields happened to come back, which would have made
-adding the fragment to a second search change behaviour in three components with nothing failing.
+Threads are checked only for authored PRs (`Queries.AuthoredAlias`).
+`HasOpenThreads` means at least one unresolved review thread has a last submitted reply from
+someone other than the author. The author's own pending reply does not count, since the
+reviewer has not seen it. Each thread is checked independently, so replying in one cannot hide
+work in another. Bot replies count like human replies; outdated threads count until resolved
+or answered. Issue comments and standalone review bodies are not threads and never count.
 
-`LastCommentAt` / `LastCommentBy` are the newest **unresolved** thing anyone said, across three sources,
-each included for its own reason:
+`Queries.ReviewThreads` asks for the first page of every PR at once. A PR whose first page has
+no work and more threads is then paged by cursor, alone, until it finds work or runs out. A
+failed or missing page fails the poll rather than reporting no work.
+Only thread state matters; comment timestamps and local read history are not fetched or stored.
 
-| Source | Counts when | Why |
-|---|---|---|
-| `comments(last: 1)` | always | an issue comment cannot be resolved, so it is outstanding until read |
-| `reviewThreads(last: 20)` | the thread is **open** | a resolved thread is a finished conversation, whoever spoke in it last |
-| `reviews(last: 5)` | the review has a body **and no inline comments** | standalone commentary has no thread to resolve; a body posted *alongside* inline comments is a summary of them, and they carry the resolution |
-
-If the newest of the three is yours, nothing is reported: you were the last to speak, so there is
-nothing here you have not read. That works whichever source carries your reply.
-
-Threads are why this does not reuse `latestReviews`, which is already fetched and would be free.
-Only a thread carries `isResolved`; `latestReviews` would drag every resolved thread's last reply
-back in. This was the bug that prompted the rule — a PR of the user's had all four of its threads
-resolved, and the reviews that had carried them were recent enough that the tab claimed the PR
-wanted something while its pill read *Awaiting review*.
-
-One call per poll keeps us well inside the GraphQL rate limit even at a one-minute
-interval.
+**What a poll costs:** the search is 6 GraphQL points and one `gh` process. The thread query is
+one more process and about half a point per PR in it, plus 1 per later page. A PR with nothing
+waiting on you is left out for the next `GitHubClient.QuietReuses` polls unless its `updatedAt`
+moves, which a new comment or review does. Resolving or reopening a thread is not guaranteed to
+move `updatedAt`, so a PR with open threads is checked every poll, and a reopened thread shows
+up within `QuietReuses + 1` polls. So a poll costs 6 points, plus about half a point per PR with
+open threads, new activity or an expired quiet answer: at most about 31 with 50 authored PRs. The
+5,000 points/hour budget belongs to the whole `gh` login, so it is shared with everything else
+using it.
 
 **Polling:** default every **2 minutes**, configurable (minimum 1 minute), plus a manual
 *Refresh* in the tray menu. Failures double the interval per consecutive failure, capped
@@ -264,14 +267,13 @@ strip above the rows.
 A PR that appears in both lists (you authored it *and* were asked to review it) is shown
 once, under the authored rules.
 
-There is a sixth callout, **new comments**, which no status can produce: it depends on what you
-have already read, which the status knows nothing about. It is computed from `LastCommentAt`
-against `CommentSeenStore` and is the one callout a PR can carry *alongside* another, so a PR
-with failing checks and an unanswered question is counted under both in the strip. The status's
-own callout leads: broken CI outranks a comment.
+The sixth callout, **open threads**, comes from `PullRequest.HasOpenThreads`. It can appear
+alongside a status callout, so failing checks and an unanswered thread count under both in
+the strip. The status callout leads. The summary and tray count work across all callouts,
+including open threads on an otherwise ready-to-merge PR.
 
 `PrCallout` is declared in the order the tab sorts by — `ReadyToMerge`, `ChecksFailing`,
-`MergeConflict`, `ChangesRequested`, `NewComments`, `NoReviewers` — so the merge button comes
+`MergeConflict`, `ChangesRequested`, `OpenThreads`, `NoReviewers` — so the merge button comes
 first and the things standing between you and it follow.
 
 A conflicted PR is never *ready*, approved and green or not: the merge button will not work
@@ -296,10 +298,7 @@ something.
 
 `PrStore` holds the current snapshot keyed by `repo#number`. Its constructor restores the snapshot
 from disk silently — nobody is subscribed yet — so `App` calls `Start()` once, after everything is
-wired, to announce it. Without that each consumer has to prime itself, which turns correctness into
-an undeclared contract about the order subscriptions were attached: the annotation stores must be
-seeded before the lists are built off them, or the first paint shows no 💬 and no event ever
-arrives to correct it.
+wired, to announce it and prune stars against the restored snapshot.
 
 After each poll it diffs the new snapshot against the previous one and emits a change for:
 
@@ -318,17 +317,16 @@ Rules that keep the noise down:
   is `PullRequest.SameStateAs`, which lives on the model rather than in the store: record equality
   cannot serve, because the three list members are rebuilt from JSON every poll and compare by
   reference. The rule for extending it is documented there — *a field the UI reads that GitHub can
-  change without stamping `updatedAt` must be named in it*. Checks, mergeability and comment
-  activity are all such fields; comment activity was added when the 💬 marker turned out to wait
-  for an unrelated change before appearing.
+  change without stamping `updatedAt` must be named in it*. Checks, mergeability and
+  `HasOpenThreads` are all such fields.
 - Only transitions *into* a notable status notify. Repeated polls with an unchanged status
   are silent. Statuses you caused yourself (`YouApproved`, `YouRequestedChanges`,
   `YouCommented`) and drafts you are requested on never toast.
 - A PR **appearing** only toasts if something is already being asked of it — it is in **Needs
   you**, or it is one of yours carrying a callout. Your own new PR is usually just you opening
   it.
-- **New comments do not toast.** They are a callout in the UI only; nothing about comment
-  activity reaches `PrStore`'s diff, so it cannot move a PR's status or raise a notification.
+- **Thread changes do not toast.** They refresh the snapshot and UI without changing the PR's
+  status. Existing status-change notifications and notification history remain independent.
 - **One toast per poll.** Every change is recorded individually in history, but if a poll
   yields several, they are composed into a single toast — `N pull request updates` with up
   to four titles and `…and K more` — that opens GitHub's PR list. A lone change toasts as
@@ -364,7 +362,6 @@ Four JSON files under the platform app-data directory
 | `notifications.json` | rolling history, capped at 200: `Title`, `Body`, `Url`, `Timestamp`, `Dismissed` |
 | `snapshot.json` | last PR snapshot, so a restart does not re-notify everything |
 | `stars.json` | keys (`repo#number`) of the PRs you starred; pruned to the live snapshot |
-| `comments-seen.json` | `repo#number` to the newest comment you had read when you last opened it; pruned to the live snapshot |
 
 Writes are atomic (write to `.tmp`, then replace). A corrupt file is renamed aside and
 recreated from defaults rather than crashing the app.
@@ -443,7 +440,7 @@ Tabs:
    worked on right now. Only your own PRs carry callouts, so the two review tabs keep the plain
    starred-then-oldest order they always had.
    Rows are two dense lines and the whole row is a button that opens the PR:
-   `[star] [CI badge] [status pill] [💬 if unread] Title … age` (the age turns bold, orange and gets an ⏳ once the
+   `[star] [CI badge] [status pill] [💬 if open threads] Title … age` (the age turns bold, orange and gets an ⏳ once the
    PR has been open for more than 24 hours) over
    `repo#number · author · +adds −dels · ✓ approvals · ✗ changes · N awaiting · 🏷 labels · updated 2h ago`.
    The status pill takes its **callout's** colour — green only when the merge button will
@@ -457,20 +454,16 @@ Tabs:
    handled and does not open the PR.
 
    Directly under the filter bar, a tab with callouts gets an **attention strip**:
-   `2 ready to merge · 1 CI failing · 1 with new comments`. Unlike the summary line it counts
+   `2 ready to merge · 1 CI failing · 1 with open threads`. Unlike the summary line it counts
    what is *visible*, since it sits directly over the rows it describes; it collapses to nothing
    on the two review tabs.
 
-   The **💬 marker** flags unresolved comments left since you last opened the PR, and appears only where the
-   pill is not already saying so — a quiet status is overruled, so a PR with nothing else outstanding reads
-   *New comments* on the pill itself rather than claiming to be merely *Awaiting review* while the strip
-   counts it as wanting something. Where the status carries a callout of its own, that leads and the marker
-   carries the rest. `CommentSeenStore` holds one timestamp per PR, and opening the PR from any tab marks it
-   read. A PR the store has never heard of reads as *quiet* — `HasUnread` says so itself, rather than
-   depending on a seeding pass having run first — so a fresh install does not announce a backlog you read on
-   GitHub months ago. `Sync` still records where each newly seen PR starts, which is what lets comments
-   arriving *after* that poll register as new; it also prunes PRs that have left the snapshot, the same job
-   `StarStore.Retain` does for stars.
+   The **💬 marker** flags unresolved review threads awaiting your reply. A quiet status
+   becomes *Open threads* on the pill; otherwise the status leads and the marker appears
+   beside it. Both use the tooltip *Unresolved review threads awaiting your reply*.
+   Opening the PR never changes this state. Work is visible on the first poll and remains
+   visible after restarting. Resolving or answering the last actionable thread clears it;
+   reopening a thread whose last reply is from someone else brings it back within a few polls.
 2. **Notifications (n)** — the persisted history, newest first, unread count in the header;
    each title is `<what happened> — <PR title>`. *Dismiss* per row, *Dismiss all*, and a
    *Show dismissed* toggle. Clicking a row opens the PR.

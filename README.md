@@ -13,7 +13,7 @@ It answers one question, quickly, without opening a browser:
   reviewer (directly or through a team).
 - **Gathers every PR you authored into one tab**, and calls out the ones wanting something:
   ready to merge, CI failing, a merge conflict, changes requested, nobody reviewing, or
-  comments you have not read.
+  open review threads awaiting your reply.
 - **Classifies every PR relative to you** — awaiting your review, changes requested,
   approved and ready to merge, CI failing, merge conflict, draft, and so on. See
   [Status model](ARCHITECTURE.md#4-status-model).
@@ -22,11 +22,11 @@ It answers one question, quickly, without opening a browser:
   toasts.
 - **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
   their tab. The star is local to the app; nothing is sent to GitHub.
-- **Flags comments you haven't read** on your own PRs, cleared by opening the PR. Resolved review
-  threads don't count — a conversation you've settled isn't waiting on you. A PR with nothing else
-  outstanding says *New comments* on its status pill; otherwise a 💬 sits beside it. This is a
-  marker, not a toast. Read state is local to the app, seeded quiet on first run so you don't
-  get a backlog.
+- **Flags open review threads awaiting your reply** on your own PRs. A thread counts while it is
+  unresolved and its last reply is from someone else, including bots and outdated threads.
+  A PR with nothing else outstanding says *Open threads* on its status pill; otherwise a 💬
+  sits beside it. Opening the PR does not clear outstanding work. Issue comments, review
+  summaries and unrelated updates do not trigger this marker. Notifications remain separate.
 - **Keeps a notification history** — every notification is written to disk so you can
   dismiss it, come back to it later, and see what you missed while away.
 
@@ -47,7 +47,7 @@ It answers one question, quickly, without opening a browser:
 
 ## Requirements
 
-- **[GitHub CLI (`gh`)](https://cli.github.com/)** installed and authenticated
+- **[GitHub CLI (`gh`)](https://cli.github.com/) 2.21.0 or later** installed and authenticated
   (`gh auth login`). The app shells out to `gh` for all GitHub access — it never asks
   you for a token and never stores credentials of its own.
 - **No .NET install** for a released build; it is native. Building from source needs the
@@ -186,6 +186,6 @@ from the app's own window icon.
 Working prototype. Phases 1–7 of the [implementation plan](ARCHITECTURE.md#implementation-plan)
 are in place: tray icon with tooltip summary, `gh`-backed polling, the status model with
 tests, change detection, native toasts (Windows verified; macOS untested), persisted
-notification history, starred PRs, the Your PRs tab with its callouts and unread-comment
-tracking, settings, start-at-login, and the installers. Signing and notarization are not
+notification history, starred PRs, the Your PRs tab with its callouts and open-thread
+indicators, settings, start-at-login, and the installers. Signing and notarization are not
 set up.

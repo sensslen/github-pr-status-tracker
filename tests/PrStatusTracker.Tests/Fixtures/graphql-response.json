@@ -3,6 +3,7 @@
     "review": {
       "nodes": [
         {
+          "id": "PR_101",
           "number": 101,
           "title": "Add retry to uploader",
           "url": "https://github.com/acme/widgets/pull/101",
@@ -21,6 +22,7 @@
           "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-14T09:00:00Z", "statusCheckRollup": { "state": "PENDING" } } } ] }
         },
         {
+          "id": "PR_42",
           "number": 42,
           "title": "Review copy",
           "url": "https://github.com/acme/widgets/pull/42",
@@ -40,6 +42,7 @@
     "authored": {
       "nodes": [
         {
+          "id": "PR_7",
           "number": 7,
           "title": "Fix flaky test",
           "url": "https://github.com/acme/gadgets/pull/7",
@@ -54,14 +57,10 @@
           "mergeable": "MERGEABLE",
           "reviewRequests": { "nodes": [] },
           "latestReviews": { "nodes": [ { "author": { "login": "bob" }, "state": "APPROVED", "submittedAt": "2026-09-15T09:30:00Z" } ] },
-          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-15T08:00:00Z", "statusCheckRollup": { "state": "SUCCESS" } } } ] },
-          "comments": { "nodes": [ { "author": { "login": "bob" }, "createdAt": "2026-09-15T09:45:00Z" } ] },
-          "reviewThreads": { "nodes": [
-            { "isResolved": false, "comments": { "nodes": [ { "author": { "login": "carol" }, "createdAt": "2026-09-15T09:30:00Z" } ] } } ] },
-          "reviews": { "nodes": [
-            { "author": { "login": "carol" }, "createdAt": "2026-09-15T09:30:00Z", "bodyText": "", "comments": { "totalCount": 1 } } ] }
+          "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-15T08:00:00Z", "statusCheckRollup": { "state": "SUCCESS" } } } ] }
         },
         {
+          "id": "PR_42",
           "number": 42,
           "title": "Authored copy",
           "url": "https://github.com/acme/widgets/pull/42",
@@ -73,12 +72,7 @@
           "mergeable": "CONFLICTING",
           "reviewRequests": { "nodes": [] },
           "latestReviews": { "nodes": [ { "author": { "login": "owen" }, "state": "COMMENTED", "submittedAt": "2026-09-10T07:00:00Z" } ] },
-          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] },
-          "comments": { "nodes": [ { "author": { "login": "dave" }, "createdAt": "2026-09-09T08:00:00Z" } ] },
-          "reviewThreads": { "nodes": [
-            { "isResolved": false, "comments": { "nodes": [ { "author": { "login": "owen" }, "createdAt": "2026-09-10T07:00:00Z" } ] } } ] },
-          "reviews": { "nodes": [
-            { "author": { "login": "owen" }, "createdAt": "2026-09-10T07:00:00Z", "bodyText": "", "comments": { "totalCount": 1 } } ] }
+          "commits": { "nodes": [ { "commit": { "committedDate": null, "statusCheckRollup": null } } ] }
         }
       ]
     }

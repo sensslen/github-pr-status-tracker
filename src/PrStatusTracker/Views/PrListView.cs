@@ -30,10 +30,6 @@ internal static class PrListView
                 .Content(group, g => g.HideTeamOnlyLabel))
             .IsVisible(group.CanHideTeamOnly);
 
-    /// <summary>
-    /// What the rows below want — `2 ready to merge · 1 CI failing · 1 with new comments`. Collapses to nothing
-    /// on the review tabs, whose rows never carry a callout, so they look exactly as they did.
-    /// </summary>
     private static Border AttentionStrip(PrGroupViewModel group) =>
         Strip(new TextBlock().FontSize(11.5).FontWeight(FontWeight.Medium).Foreground(AccentBrush)
                 .TextTrimming(TextTrimming.CharacterEllipsis)
@@ -74,12 +70,14 @@ internal static class PrListView
                 .Children(
                     StarToggle(vm, item).Grid_Row(0).Grid_RowSpan(2).Grid_Column(0).Margin(0, 0, 6, 0),
                     CheckBadge(item.Checks).Grid_Row(0).Grid_Column(1).Margin(0, 0, 8, 0),
-                    Pill(item.StatusLabel, PillBrush(item)).Grid_Row(0).Grid_Column(2).Margin(0, 0, 8, 0),
+                    Pill(item.StatusLabel, PillBrush(item))
+                        .ToolTip_Tip(item.Callout == PrCallout.OpenThreads ? item.OpenThreadsTip : null)
+                        .Grid_Row(0).Grid_Column(2).Margin(0, 0, 8, 0),
                     // Only when the pill is saying something else; otherwise it would repeat it.
-                    CommentMarker(item, item.HasNewComments && item.Callout != PrCallout.NewComments)
+                    CommentMarker(item, item.HasOpenThreads && item.Callout != PrCallout.OpenThreads)
                         .Grid_Row(0).Grid_Column(3).Margin(0, 0, 8, 0),
                     RowTitle(item.Title).Grid_Row(0).Grid_Column(4),
                     AgeLabel(item).Grid_Row(0).Grid_Column(5).Margin(8, 0, 0, 0),
                     Meta(item.Details).Grid_Row(1).Grid_Column(4).Grid_ColumnSpan(2).Margin(0, 1, 0, 0)),
-            () => vm.OpenPr(item));
+            () => MainViewModel.OpenPr(item));
 }

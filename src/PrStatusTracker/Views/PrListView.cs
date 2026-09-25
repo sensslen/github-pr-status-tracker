@@ -1,4 +1,7 @@
-﻿using PrStatusTracker.Models;
+﻿using Avalonia.Controls.Primitives;
+using Avalonia.Data.Converters;
+using Avalonia.Styling;
+using PrStatusTracker.Models;
 using PrStatusTracker.ViewModels;
 using static PrStatusTracker.Views.ViewHelpers;
 
@@ -14,8 +17,43 @@ internal static class PrListView
             AttentionStrip(group).DockPanel_Dock(Dock.Top),
             new Panel().Children(
                 new ScrollViewer().Content(
-                    new ItemsControl().Margin(10, 8).ItemsSource(group.Items).ItemTemplate(Template<PrItemViewModel>(item => BuildRow(vm, item)))),
+                    new ItemsControl().Margin(10, 8).ItemsSource(group.Repositories)
+                        .ItemTemplate(Template<PrRepositoryViewModel>(repository => RepositorySection(vm, repository)))),
                 EmptyLabel(group).Margin(10, 8).IsVisible(group, g => g.IsEmpty)));
+
+    private static Expander RepositorySection(MainViewModel vm, PrRepositoryViewModel repository) =>
+        new Expander
+        {
+            Resources =
+            {
+                ["ExpanderHeaderPadding"] = new Thickness(0),
+                ["ExpanderHeaderBorderThickness"] = new Thickness(0),
+                ["ExpanderHeaderBackground"] = Brushes.Transparent,
+                ["ExpanderContentDownBorderThickness"] = new Thickness(0),
+            },
+            Styles =
+            {
+                new Style(s => s.OfType<Expander>().Template().OfType<ToggleButton>().Template().OfType<Border>().Name("ExpandCollapseChevronBorder"))
+                {
+                    Setters = { new Setter(Visual.IsVisibleProperty, false) },
+                },
+            },
+        }
+        .HorizontalAlignment(HorizontalAlignment.Stretch).HorizontalContentAlignment(HorizontalAlignment.Stretch)
+        .MinHeight(24).Padding(0).BorderThickness(0).Background(Brushes.Transparent).Margin(0, 0, 0, 3)
+        .IsExpanded(repository, r => r.IsExpanded, BindingMode.TwoWay)
+        .Header(repository.Name)
+        .HeaderTemplate(Template<string>(name =>
+            new StackPanel().Orientation(Orientation.Horizontal).Spacing(6).Children(
+                new PathIcon().Width(10).Height(10).VerticalAlignment(VerticalAlignment.Center)
+                    .Data(repository, r => r.IsExpanded, converter: new FuncValueConverter<bool, Geometry>(expanded =>
+                        Geometry.Parse(expanded
+                            ? "M0,2 L5,7 L10,2 L9,1 L5,5 L1,1 Z"
+                            : "M2,0 L7,5 L2,10 L1,9 L5,5 L1,1 Z"))),
+                new TextBlock().Text(name).FontSize(12).FontWeight(FontWeight.SemiBold)
+                    .VerticalAlignment(VerticalAlignment.Center))))
+        .Content(new ItemsControl().ItemsSource(repository, r => r.Items)
+            .ItemTemplate(Template<PrItemViewModel>(item => BuildRow(vm, item))));
 
     /// <summary>
     /// The Needs you tab's own line under the bar: drop the PRs you are only being asked for because a team you

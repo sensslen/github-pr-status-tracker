@@ -9,11 +9,170 @@ namespace PrStatusTracker.Tests;
 public class PrGroupViewModelTests
 {
     private static PrItemViewModel Item(string author, int number, string repo = "org/repo",
-        PrStatus status = PrStatus.AwaitingReview) =>
-        new(new(Pr(number: number, author: author, repo: repo), status), isStarred: false);
+        PrStatus status = PrStatus.AwaitingReview, bool starred = false, DateTimeOffset? createdAt = null,
+        bool openThreads = false) =>
+        new(new(Pr(number: number, author: author, repo: repo, openThreads: openThreads)
+            with
+        { CreatedAt = createdAt ?? T0.AddDays(-1) }, status), starred);
 
     private static PrItemViewModel TeamOnly(int number, string repo = "org/repo") =>
         Item(Other, number, repo, PrStatus.RequestedViaTeam);
+
+    [Theory]
+    [InlineData(PrBucket.NeedsYou, PrStatus.AwaitingYourReview)]
+    [InlineData(PrBucket.WaitingOnOthers, PrStatus.YouApproved)]
+    [InlineData(PrBucket.YourPrs, PrStatus.AwaitingReview)]
+    public void Every_tab_groups_repositories_alphabetically_with_stars_inside_their_header(PrBucket bucket, PrStatus status)
+    {
+        var group = new PrGroupViewModel(bucket, new PrFilterViewModel());
+        group.Replace([
+            Item(Me, 1, "org/Zeta", status, starred: true),
+            Item(Me, 2, "org/alpha", status),
+            Item(Me, 3, "org/Zeta", status),
+            Item(Me, 4, "org/alpha", status, starred: true),
+        ]);
+
+        Assert.Equal(["org/alpha", "org/Zeta"], group.Repositories.Select(r => r.Name));
+        Assert.Equal([4, 2], group.Repositories[0].Items.Select(i => i.Pr.Number));
+        Assert.Equal([1, 3], group.Repositories[1].Items.Select(i => i.Pr.Number));
+        Assert.Equal(group.Repositories.SelectMany(r => r.Items), group.Repositories.SelectMany(r => r.Items));
+        Assert.Equal(4, group.TotalCount);
+        Assert.Equal($"{bucket.Label()} (4)", group.Header);
+    }
+
+    [Fact]
+    public void Stars_outrank_callouts_and_quiet_states_stay_separate_inside_each_star_partition()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        group.Replace([
+            Item(Me, 1, status: PrStatus.Draft, starred: true),
+            Item(Me, 2, starred: true, createdAt: T0),
+            Item(Me, 7, status: PrStatus.Draft),
+            Item(Me, 6, createdAt: T0),
+            Item(Me, 5, status: PrStatus.Draft, openThreads: true),
+            Item(Me, 4, status: PrStatus.ChecksFailing),
+            Item(Me, 3, status: PrStatus.ReadyToMerge),
+        ]);
+
+        Assert.Equal([2, 1, 3, 4, 5, 6, 7], group.Repositories.SelectMany(r => r.Items).Select(i => i.Pr.Number));
+        Assert.Equal("1 ready to merge · 1 CI failing · 1 with open threads", group.Attention);
+    }
+
+    [Theory]
+    [InlineData(PrBucket.NeedsYou, PrStatus.AwaitingYourReview, PrStatus.AwaitingYourRereview)]
+    [InlineData(PrBucket.WaitingOnOthers, PrStatus.YouApproved, PrStatus.ReviewerDraft)]
+    [InlineData(PrBucket.YourPrs, PrStatus.AwaitingReview, PrStatus.Draft)]
+    public void Status_then_age_then_number_break_ties_regardless_of_input_order(
+        PrBucket bucket, PrStatus first, PrStatus last)
+    {
+        var group = new PrGroupViewModel(bucket, new PrFilterViewModel());
+        PrItemViewModel[] rows = [
+            Item(Me, 1, status: last, createdAt: T0.AddDays(-3)),
+            Item(Me, 4, status: first),
+            Item(Me, 2, status: first),
+            Item(Me, 3, status: first, createdAt: T0.AddDays(-2)),
+        ];
+
+        foreach (var input in new[] { rows, rows.Reverse().ToArray() })
+        {
+            group.Replace(input);
+            Assert.Equal([3, 2, 4, 1], group.Repositories.SelectMany(r => r.Items).Select(i => i.Pr.Number));
+        }
+    }
+
+    [Fact]
+    public void Repository_spelling_breaks_case_insensitive_sort_ties()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        PrItemViewModel[] rows = [Item(Me, 1, "org/repo"), Item(Me, 2, "Org/Repo")];
+
+        foreach (var input in new[] { rows, rows.Reverse().ToArray() })
+        {
+            group.Replace(input);
+            Assert.Equal(["Org/Repo", "org/repo"], group.Repositories.Select(r => r.Name));
+        }
+    }
+
+    [Fact]
+    public void Filtering_removes_empty_repository_headers_and_counts_only_visible_callouts()
+    {
+        var filter = new PrFilterViewModel { Text = "#2" };
+        var group = new PrGroupViewModel(PrBucket.YourPrs, filter);
+        PrItemViewModel[] rows = [
+            Item(Me, 1, "org/hidden", PrStatus.ChecksFailing),
+            Item(Me, 2, "org/visible", openThreads: true),
+        ];
+        group.Replace(rows);
+
+        Assert.Equal("org/visible", Assert.Single(group.Repositories).Name);
+        Assert.Equal("Your PRs (1 of 2)", group.Header);
+        Assert.Equal("1 with open threads", group.Attention);
+
+        filter.Text = "no match";
+        group.Replace(rows);
+        Assert.Empty(group.Repositories);
+        Assert.Empty(group.Repositories.SelectMany(r => r.Items));
+        Assert.True(group.IsEmpty);
+        Assert.Equal(string.Empty, group.Attention);
+
+        filter.Clear();
+        group.Replace(rows);
+        Assert.Equal(2, group.Repositories.Count);
+    }
+
+    [Fact]
+    public void Hiding_team_only_requests_removes_their_empty_repository_header()
+    {
+        var group = new PrGroupViewModel(PrBucket.NeedsYou, new PrFilterViewModel()) { HideTeamOnly = true };
+        group.Replace([
+            TeamOnly(1, "org/hidden"),
+            Item(Other, 2, "org/visible", PrStatus.AwaitingYourReview),
+        ]);
+
+        Assert.Equal("org/visible", Assert.Single(group.Repositories).Name);
+        Assert.Equal("Needs you (1 of 2)", group.Header);
+        Assert.Equal("Hide team-only requests (1 hidden)", group.HideTeamOnlyLabel);
+    }
+
+    [Theory]
+    [InlineData(PrBucket.NeedsYou, PrStatus.AwaitingYourReview)]
+    [InlineData(PrBucket.WaitingOnOthers, PrStatus.YouApproved)]
+    [InlineData(PrBucket.YourPrs, PrStatus.AwaitingReview)]
+    public void Collapse_state_survives_refresh_and_filtering_without_changing_counts(PrBucket bucket, PrStatus status)
+    {
+        var filter = new PrFilterViewModel();
+        var group = new PrGroupViewModel(bucket, filter);
+        PrItemViewModel[] rows = [Item(Me, 1, status: status, starred: true, openThreads: true)];
+        group.Replace(rows);
+        var repository = Assert.Single(group.Repositories);
+        Assert.True(repository.IsExpanded);
+        var attention = group.Attention;
+
+        repository.IsExpanded = false;
+        group.Replace([Item(Me, 2, status: status), .. rows]);
+        Assert.Same(repository, Assert.Single(group.Repositories));
+        Assert.False(repository.IsExpanded);
+        Assert.Equal([1, 2], repository.Items.Select(i => i.Pr.Number));
+        Assert.Equal($"{bucket.Label()} (2)", group.Header);
+        Assert.Equal(2, group.TotalCount);
+        Assert.False(group.IsEmpty);
+        Assert.Equal(attention, group.Attention);
+
+        filter.Text = "no match";
+        group.Replace(rows);
+        Assert.Empty(group.Repositories);
+        filter.Clear();
+        group.Replace(rows);
+        Assert.Same(repository, Assert.Single(group.Repositories));
+        Assert.False(repository.IsExpanded);
+
+        var otherTab = new PrGroupViewModel(bucket, filter);
+        otherTab.Replace(rows);
+        Assert.True(Assert.Single(otherTab.Repositories).IsExpanded);
+        repository.IsExpanded = true;
+        group.Replace(rows);
+        Assert.True(repository.IsExpanded);
+    }
 
     [Fact]
     public void Tabs_sharing_a_bar_narrow_together()
@@ -26,8 +185,8 @@ public class PrGroupViewModelTests
         needsYou.Replace([Item(Me, 1), Item(Other, 2)]);
         waiting.Replace([Item(Other, 3)]);
 
-        Assert.Equal(2, Assert.Single(needsYou.Items).Pr.Number);
-        Assert.Single(waiting.Items);
+        Assert.Equal(2, Assert.Single(needsYou.Repositories.SelectMany(r => r.Items)).Pr.Number);
+        Assert.Single(waiting.Repositories.SelectMany(r => r.Items));
         Assert.Equal("Needs you (1 of 2)", needsYou.Header);
     }
 
@@ -44,8 +203,8 @@ public class PrGroupViewModelTests
         needsYou.Replace([Item(Other, 1)]);
         yours.Replace([Item(Me, 2), Item(Me, 3)]);
 
-        Assert.Empty(needsYou.Items);
-        Assert.Equal(2, yours.Items.Count);
+        Assert.Empty(needsYou.Repositories.SelectMany(r => r.Items));
+        Assert.Equal(2, yours.Repositories.SelectMany(r => r.Items).Count());
         Assert.Equal("Your PRs (2)", yours.Header);
     }
 
@@ -78,7 +237,7 @@ public class PrGroupViewModelTests
 
         needsYou.Replace([Item(Other, 1, status: PrStatus.AwaitingYourReview), TeamOnly(2)]);
 
-        Assert.Equal(1, Assert.Single(needsYou.Items).Pr.Number);
+        Assert.Equal(1, Assert.Single(needsYou.Repositories.SelectMany(r => r.Items)).Pr.Number);
         // View-only: the tray and the summary line read TotalCount, and it still counts what is hidden.
         Assert.Equal(2, needsYou.TotalCount);
         // With no bar active, the header and the checkbox are the only things accounting for the missing row.
@@ -105,7 +264,7 @@ public class PrGroupViewModelTests
 
         waiting.Replace([TeamOnly(1)]);
 
-        Assert.Single(waiting.Items);
+        Assert.Single(waiting.Repositories.SelectMany(r => r.Items));
         Assert.Equal("Waiting on others (1)", waiting.Header);
         Assert.Equal("Hide team-only requests", waiting.HideTeamOnlyLabel);
     }
@@ -120,7 +279,7 @@ public class PrGroupViewModelTests
         bar.Repo = "org/repo";
         needsYou.Replace([TeamOnly(1), TeamOnly(2, "org/other")]);
 
-        Assert.Empty(needsYou.Items);
+        Assert.Empty(needsYou.Repositories.SelectMany(r => r.Items));
         Assert.Equal("Hide team-only requests (1 hidden)", needsYou.HideTeamOnlyLabel);
     }
 

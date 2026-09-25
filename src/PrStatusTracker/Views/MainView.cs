@@ -74,25 +74,18 @@ internal static class ViewHelpers
         _ => NeutralBrush,
     };
 
-    /// <summary>
-    /// Colour for a row's status pill. Within Your PRs the pill is the callout, so it answers what the PR wants
-    /// rather than restating which tab you are on: green only when the merge button will actually work, red when
-    /// something is broken, orange when someone is waiting on you, accent when the only thing outstanding is a
-    /// conversation. Rows on the two review tabs carry no callout and fall back to their bucket's colour.
-    /// </summary>
     public static IBrush PillBrush(PrItemViewModel item) => item.Callout switch
     {
         PrCallout.ReadyToMerge => ReadyBrush,
         PrCallout.ChecksFailing or PrCallout.MergeConflict => FailBrush,
-        PrCallout.ChangesRequested or PrCallout.NoReviewers => NeedsYouBrush,
-        PrCallout.OpenThreads => AccentBrush,
+        PrCallout.ChangesRequested or PrCallout.NoReviewers or PrCallout.OpenThreads => NeedsYouBrush,
         _ => BucketBrush(item.Status.Bucket()),
     };
 
     public static TextBlock CommentMarker(PrItemViewModel item, bool visible)
     {
         var label = new TextBlock().Text("💬").FontSize(11).FontWeight(FontWeight.SemiBold)
-            .Foreground(AccentBrush).VerticalAlignment(VerticalAlignment.Center)
+            .Foreground(NeedsYouBrush).VerticalAlignment(VerticalAlignment.Center)
             .IsVisible(visible);
         if (visible)
         {
@@ -115,7 +108,7 @@ internal static class ViewHelpers
             .Background(Brushes.Transparent).BorderThickness(0).Padding(2, 0).Cursor(HandCursor)
             .VerticalAlignment(VerticalAlignment.Center)
             .OnClick(e => { e.Handled = true; vm.ToggleStar(item); });
-        ToolTip.SetTip(button, item.IsStarred ? "Starred — click to unstar" : "Star this PR to keep it at the top");
+        ToolTip.SetTip(button, item.IsStarred ? "Starred — click to unstar" : "Star this PR to keep it at the top of its repository");
         return button;
     }
 

@@ -20,12 +20,17 @@ It answers one question, quickly, without opening a browser:
 - **Notifies you when a PR's state changes** — a review lands on your PR, a new PR is
   assigned to you, CI goes red, your PR becomes mergeable. Notifications use native OS
   toasts.
+- **Groups every PR tab by repository**, alphabetically. Within each repository, stars come
+  first, then action callouts, then status, with ordinary drafts after awaiting review.
+  Ties sort oldest first, then by PR number. Repository sections start expanded; collapse a
+  header to hide its rows. Each tab remembers collapsed sections across refreshes and filters
+  until the app exits. Collapsing never changes counts or attention indicators.
 - **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
-  their tab. The star is local to the app; nothing is sent to GitHub.
+  their repository, above every status. The star is local to the app; nothing is sent to GitHub.
 - **Flags open review threads awaiting your reply** on your own PRs. A thread counts while it is
   unresolved and its last reply is from someone else, including bots and outdated threads.
-  A PR with nothing else outstanding says *Open threads* on its status pill; otherwise a 💬
-  sits beside it. Opening the PR does not clear outstanding work. Issue comments, review
+  A PR with nothing else outstanding says *Open threads* on an orange status pill; otherwise an
+  orange 💬 sits beside it. Opening the PR does not clear outstanding work. Issue comments, review
   summaries and unrelated updates do not trigger this marker. Notifications remain separate.
 - **Keeps a notification history** — every notification is written to disk so you can
   dismiss it, come back to it later, and see what you missed while away.
@@ -39,8 +44,8 @@ It answers one question, quickly, without opening a browser:
 | Click the tray icon | Opens the main window |
 | Right-click the tray icon | Menu: open main window, refresh, open GitHub, quit |
 | Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Your PRs*), plus Notifications and Settings; every row opens its PR |
-| Your PRs tab | Everything you authored, whatever state it's in. A strip above the rows counts what's calling for attention (`2 ready to merge · 1 CI failing`), and those rows sort to the top |
-| Star a row (☆) | Pins that PR to the top of its tab; persists across restarts. Click ★ again to unstar |
+| Your PRs tab | Everything you authored, whatever state it's in. A strip above the rows counts what's calling for attention (`2 ready to merge · 1 CI failing`). Within each repository, callouts come first inside the starred and unstarred groups |
+| Star a row (☆) | Pins that PR above unstarred rows in its repository; persists across restarts. Click ★ again to unstar |
 | Filter bar | On every PR tab: free text (title, repo, author, label, `#number`) plus label / repo dropdowns, and author where there's more than one. *Needs you* and *Waiting on others* share a bar; *Your PRs* has its own, so narrowing one never narrows the other. Never affects the tray |
 | Toast notification | One toast per poll, however many PRs changed; clicking it opens the PR (or GitHub's PR list for a batch) |
 | Notification centre (in-app) | Persisted, dismissible list of past notifications |

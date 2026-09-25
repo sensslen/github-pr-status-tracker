@@ -435,10 +435,19 @@ counting what unchecking it would bring back rather than rows the bar was exclud
 Tabs:
 
 1. **Needs you / Waiting on others / Your PRs** — tab headers carry the count.
-   Every PR list is sorted **oldest PR first** (by `createdAt`). Above that sit rows carrying a
-   callout, most pressing callout first, and above *those* the starred PRs — the ones being
-   worked on right now. Only your own PRs carry callouts, so the two review tabs keep the plain
-   starred-then-oldest order they always had.
+   Every PR tab has **repository headers**, ordered alphabetically using ordinal case-insensitive
+   comparison, with ordinal spelling as a tie-breaker. `PrGroupViewModel.Replace` filters before
+   building sections, so hidden repositories leave no empty headers. Within a repository, starred
+   rows come first, then rows carrying a callout in callout priority order. Each partition sorts
+   non-drafts before drafts, then by status, oldest `createdAt`, and PR number. Ordinary awaiting
+   review rows therefore stay together ahead of ordinary drafts within each star partition.
+   Stars pin above all statuses in their repository, not above other repository sections.
+   Each section uses a native `Expander`, expanded by default. Its per-tab repository view model
+   keeps expansion state across polls and filtering for the current app session. Collapsing hides
+   every row, including stars, but leaves the header and tab counts/attention unchanged.
+   Headers are 24 logical pixels tall, with a small chevron to the left of the repository name,
+   theme foreground, and no filled background or border. The chevron points right when collapsed
+   and down when expanded. Native toggle behavior and keyboard focus remain intact.
    Rows are two dense lines and the whole row is a button that opens the PR:
    `[star] [CI badge] [status pill] [💬 if open threads] Title … age` (the age turns bold, orange and gets an ⏳ once the
    PR has been open for more than 24 hours) over
@@ -460,7 +469,8 @@ Tabs:
 
    The **💬 marker** flags unresolved review threads awaiting your reply. A quiet status
    becomes *Open threads* on the pill; otherwise the status leads and the marker appears
-   beside it. Both use the tooltip *Unresolved review threads awaiting your reply*.
+   beside it. Both use the same orange as other work awaiting you and the tooltip
+   *Unresolved review threads awaiting your reply*.
    Opening the PR never changes this state. Work is visible on the first poll and remains
    visible after restarting. Resolving or answering the last actionable thread clears it;
    reopening a thread whose last reply is from someone else brings it back within a few polls.

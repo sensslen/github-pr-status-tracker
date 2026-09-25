@@ -25,7 +25,6 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
     /// <summary>One dense line: repo, author, size, review tallies, labels, last activity.</summary>
     public string Details { get; } = BuildDetails(tracked.Pr);
 
-    /// <summary>Marked by the user as one they are working through; starred rows sort to the top of their bucket.</summary>
     public bool IsStarred { get; } = isStarred;
 
     public bool HasOpenThreads => Callouts.Contains(PrCallout.OpenThreads);
@@ -93,10 +92,18 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
     }
 }
 
+public sealed partial class PrRepositoryViewModel(string name) : ObservableObject
+{
+    public string Name { get; } = name;
+    [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
+    [ObservableProperty] public partial IReadOnlyList<PrItemViewModel> Items { get; set; } = [];
+}
+
 /// <summary>One bucket's rows plus the derived bits the views bind to (tab header, empty state).</summary>
 public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel filter) : ObservableObject
 {
     private const string HideTeamOnlyText = "Hide team-only requests";
+    private readonly Dictionary<string, PrRepositoryViewModel> _repositories = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Stands in for the bucket's own wording once a tab is narrowed. "Nothing needs you right now" is a claim
@@ -111,7 +118,7 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
     /// <summary>The bar above this tab's rows. Some tabs share one of these; Your PRs has its own.</summary>
     public PrFilterViewModel Filter { get; } = filter;
     [ObservableProperty] public partial string EmptyText { get; set; } = bucket.EmptyText();
-    public ObservableCollection<PrItemViewModel> Items { get; } = [];
+    public ObservableCollection<PrRepositoryViewModel> Repositories { get; } = [];
 
     /// <summary>Rows in this bucket before filtering; what the tray and summary count.</summary>
     public int TotalCount { get; private set; }
@@ -160,10 +167,19 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         var hidingTeamOnly = CanHideTeamOnly && HideTeamOnly;
         var teamOnlyHidden = 0;
         TotalCount = all.Count;
-        Items.Clear();
+        var items = new List<PrItemViewModel>();
         // Sifted by the bar first, so the count below is what unchecking the box would bring back rather than
         // rows the bar was excluding anyway.
-        foreach (var item in all.Where(i => filter.Matches(i.Pr)))
+        foreach (var item in all.Where(i => filter.Matches(i.Pr))
+            .OrderBy(i => i.Pr.Repo, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(i => i.Pr.Repo, StringComparer.Ordinal)
+            .ThenByDescending(i => i.IsStarred)
+            .ThenByDescending(i => i.NeedsAttention)
+            .ThenBy(i => i.Callout)
+            .ThenBy(i => i.Status.IsDraft())
+            .ThenBy(i => i.Status)
+            .ThenBy(i => i.Pr.CreatedAt)
+            .ThenBy(i => i.Pr.Number))
         {
             if (hidingTeamOnly && item.Status == PrStatus.RequestedViaTeam)
             {
@@ -171,10 +187,23 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
                 continue;
             }
 
-            Items.Add(item);
+            items.Add(item);
         }
 
-        IsEmpty = Items.Count == 0;
+        Repositories.Clear();
+        foreach (var rows in items.GroupBy(i => i.Pr.Repo, StringComparer.Ordinal))
+        {
+            if (!_repositories.TryGetValue(rows.Key, out var repository))
+            {
+                repository = new PrRepositoryViewModel(rows.Key);
+                _repositories.Add(rows.Key, repository);
+            }
+
+            repository.Items = rows.ToArray();
+            Repositories.Add(repository);
+        }
+
+        IsEmpty = items.Count == 0;
         // Empty and narrowed-to-nothing are different states, and only the first is the bucket's to describe.
         // Conditioned on what will actually be shown, so the property does not read as a claim about a tab
         // that has rows — and, like the header, without naming which narrowing emptied it.
@@ -183,11 +212,11 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         // Missing rows are the whole test for whether this tab is narrowed, whatever did the narrowing: nothing
         // here adds rows, and a bar that is not active matches everything. So no future narrowing has to be
         // named on this line — which is what the toggle would otherwise have had to be.
-        Header = Items.Count != TotalCount
-            ? $"{Bucket.Label()} ({Items.Count} of {TotalCount})"
+        Header = items.Count != TotalCount
+            ? $"{Bucket.Label()} ({items.Count} of {TotalCount})"
             : MainViewModel.WithCount(Bucket.Label(), TotalCount);
         // Rows on the review tabs never carry a callout, so there is nothing there to add up.
-        Attention = Bucket == PrBucket.YourPrs ? Summarise(Items) : string.Empty;
+        Attention = Bucket == PrBucket.YourPrs ? Summarise(items) : string.Empty;
     }
 
     /// <summary>A failing PR with open threads must be counted under both callouts.</summary>
@@ -464,15 +493,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void RefreshGroups()
     {
-        // Starred first — those are the ones being worked on right now — then anything calling for attention,
-        // most pressing callout first, then oldest PR first, so the ones that have waited longest come to the
-        // top. Only your own PRs carry callouts, so for the two review tabs this is the old star/age order.
         var items = _store.Current
             .Select(t => new PrItemViewModel(t, _stars.IsStarred(t.Key)))
-            .OrderByDescending(i => i.IsStarred)
-            .ThenByDescending(i => i.NeedsAttention)
-            .ThenBy(i => i.Callout)
-            .ThenBy(i => i.Pr.CreatedAt)
             .ToList();
         // Each bar offers choices drawn from the rows it filters, so the Your PRs repo dropdown lists the
         // repos you have PRs in rather than every repo you have ever been asked to review.

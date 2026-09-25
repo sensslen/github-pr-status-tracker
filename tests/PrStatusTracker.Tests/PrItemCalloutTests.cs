@@ -93,7 +93,7 @@ public class PrItemCalloutTests
             void AssertWork(bool open)
             {
                 Dispatcher.UIThread.RunJobs();
-                Assert.Equal(open, Assert.Single(vm.YourPrs.Items).HasOpenThreads);
+                Assert.Equal(open, Assert.Single(vm.YourPrs.Repositories.SelectMany(r => r.Items)).HasOpenThreads);
                 Assert.Equal(open ? "1 ready to merge · 1 with open threads" : "1 ready to merge", vm.YourPrs.Attention);
                 Assert.Equal(open ? "0 need you · 0 waiting · 1 yours (1 ready · 1 need attention)"
                     : "0 need you · 0 waiting · 1 yours (1 ready)", vm.Summary);
@@ -102,7 +102,7 @@ public class PrItemCalloutTests
             }
 
             AssertWork(true);
-            MainViewModel.OpenPr(Assert.Single(vm.YourPrs.Items));
+            MainViewModel.OpenPr(Assert.Single(vm.YourPrs.Repositories.SelectMany(r => r.Items)));
             stars.Toggle(tracked.Key);
             AssertWork(true);
 

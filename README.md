@@ -1,4 +1,4 @@
-# GitHub PR Status Tracker
+﻿# GitHub PR Status Tracker
 
 A small cross-platform (Windows + macOS) tray application that keeps an eye on the GitHub
 pull requests you care about and tells you when one of them needs you.
@@ -156,6 +156,14 @@ packaging/macos/make-bundle.sh <publish dir> 1.2.3 "PR Status Tracker.app"
 It wraps the publish output in a menu-bar (`LSUIElement`) bundle and ad-hoc signs it. A Developer
 ID signature and notarization, which is what native `UNUserNotificationCenter` notifications
 would need, are not set up.
+
+### Updates
+
+The app checks the releases page once a day and offers the newer version in the window header and
+under *Settings > Updates*. On Windows, accepting it downloads the installer, runs it silently and
+restarts the app; on macOS it downloads the disk image and opens it for the drag to Applications.
+The check and the download both go through `gh`, so a private repository needs no token of its own.
+Only a build made from a tag carries a version; a build from source is 0.0.0 and is offered nothing.
 
 Both read their icons from `packaging/icon/`, which `packaging/icon/make-icons.py` regenerates
 from the app's own window icon.

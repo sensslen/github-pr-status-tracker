@@ -24,6 +24,11 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
                         new Button().DockPanel_Dock(Dock.Right).Content("Refresh").FontSize(12).Padding(10, 4)
                             .IsEnabled(vm, x => !x.IsRefreshing)
                             .OnClick(e => { _ = vm.RefreshAsync(); }),
+                        // Nobody goes looking in Settings for an update, so the offer is made where the app is read.
+                        new Button().DockPanel_Dock(Dock.Right).Content(MainViewModel.UpdateActionLabel).FontSize(12).Padding(10, 4).Margin(0, 0, 8, 0)
+                            .IsVisible(vm, x => x.UpdateAvailable)
+                            .IsEnabled(vm, x => !x.IsInstallingUpdate)
+                            .OnClick(e => { _ = vm.InstallUpdateAsync(); }),
                         new StackPanel().Orientation(Orientation.Horizontal).Spacing(10).VerticalAlignment(VerticalAlignment.Center).Children(
                             new TextBlock().FontSize(14).FontWeight(FontWeight.SemiBold).VerticalAlignment(VerticalAlignment.Center).Text(vm, x => x.Summary),
                             new TextBlock().FontSize(11).Opacity(0.6).VerticalAlignment(VerticalAlignment.Center).Text(vm, x => x.LastChecked)))),

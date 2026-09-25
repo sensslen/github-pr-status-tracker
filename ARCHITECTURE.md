@@ -59,6 +59,7 @@ src/PrStatusTracker/
     StarStore.cs              // the PRs you starred, persisted
     CommentSeenStore.cs       // how far you have read each of your own PRs, persisted
     PollingService.cs
+    UpdateService.cs            // release check + installer handoff, both through `gh`
     JsonFileStore.cs          // load/save for settings, snapshot, notifications
   Notifications/
     INotifier.cs              // + NullNotifier for other platforms
@@ -509,6 +510,24 @@ release. NativeAOT, so neither carries a .NET runtime. Scripts under `packaging/
 - **Not signed.** The bundle is ad-hoc signed, which is the least Gatekeeper accepts as openable;
   a Developer ID and notarization, which `UNUserNotificationCenter` notifications would need, are
   not set up. Windows setup is unsigned and meets SmartScreen.
+
+---
+
+## 9. Updating
+
+`UpdateService` asks `gh release view` for the latest full release once a day, on the back of a
+successful poll, and compares its tag with the assembly version. A prerelease never offers itself,
+because naming no tag asks GitHub for the latest full release.
+
+The release assets are private, so the download runs as `gh release download` too: the user's
+credentials, the same ones every query uses, and no token inside the application.
+
+- **Windows** — the setup for this platform is downloaded and run with `/S`. Setup holds the
+  application's single-instance mutex while it copies and aborts a silent run rather than
+  overwrite a running executable, so it has to start after the application is gone: a detached
+  PowerShell waits for the process id, installs, and launches what replaced it.
+- **macOS** — the disk image is downloaded and opened. Replacing an ad-hoc signed bundle in a
+  directory the process may not own is the user's drag to make.
 
 ---
 

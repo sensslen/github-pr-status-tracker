@@ -1,5 +1,6 @@
 ﻿using Avalonia.Platform;
 using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
 using PrStatusTracker.Core;
 using PrStatusTracker.GitHub;
 using PrStatusTracker.Models;
@@ -44,8 +45,9 @@ public sealed class App : Application
         var notifications = new NotificationService(store, Notifier.ForCurrentPlatform(),
             new JsonFileStore<List<NotificationRecord>>(AppPaths.Notifications), () => settings);
         var poller = new PollingService(github, store, () => settings);
+        var updates = new UpdateService(gh, () => Dispatcher.UIThread.Post(() => desktop.Shutdown()));
         var vm = new MainViewModel(store, stars, seen, poller, notifications, settings, settingsFile,
-            AutoStart.ForCurrentPlatform(), gh);
+            AutoStart.ForCurrentPlatform(), gh, updates);
 
         var window = new Window()
             .Title("PR Status Tracker")

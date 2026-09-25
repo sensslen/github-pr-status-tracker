@@ -38,6 +38,16 @@ internal static class SettingsView
                             new TextBlock().TextWrapping(TextWrapping.Wrap).FontFamily(new FontFamily("Consolas, Menlo, monospace")).FontSize(12)
                                 .Text(vm, x => x.GhPath),
                             new Button().Content("Re-check").HorizontalAlignment(HorizontalAlignment.Left).OnClick(_ => vm.RecheckGh()))),
+                    Section("Updates",
+                        new StackPanel().Spacing(6).Children(
+                            new TextBlock().FontSize(12).Opacity(0.7).Text($"Version {MainViewModel.CurrentVersion}"),
+                            new TextBlock().FontSize(12).TextWrapping(TextWrapping.Wrap).Text(vm, x => x.UpdateStatus),
+                            new StackPanel().Orientation(Orientation.Horizontal).Spacing(8).Children(
+                                new Button().Content("Check now").OnClick(e => { _ = vm.CheckForUpdatesAsync(force: true); }),
+                                new Button().Content(MainViewModel.UpdateActionLabel)
+                                    .IsVisible(vm, x => x.UpdateAvailable)
+                                    .IsEnabled(vm, x => !x.IsInstallingUpdate)
+                                    .OnClick(e => { _ = vm.InstallUpdateAsync(); })))),
                     Section("Data",
                         new StackPanel().Spacing(2).Children(
                             new TextBlock().FontSize(12).Opacity(0.7).Text("Settings, snapshot and notification history live in"),

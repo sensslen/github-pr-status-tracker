@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <RootNamespace>PrStatusTracker</RootNamespace>
     <AssemblyName>PrStatusTracker</AssemblyName>
+    <!-- The release build passes the tag's version; 0.0.0 is what a build from source keeps, and the updater
+         reads it as "not a release" so no tag ever looks newer than it. -->
+    <Version>0.0.0</Version>
     <ApplicationManifest Condition="Exists('app.manifest')">app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\packaging\icon\AppIcon.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>

@@ -222,6 +222,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly JsonFileStore<AppSettings> _settingsFile;
     private readonly IAutoStart _autoStart;
     private readonly GhCommandRunner _gh;
+    private readonly UpdateService _updates;
     private readonly PrGroupViewModel[] _groups;
     private bool _startAtLogin;
 
@@ -234,7 +235,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public MainViewModel(PrStore store, StarStore stars, CommentSeenStore seen, PollingService poller,
         NotificationService notifications, AppSettings settings, JsonFileStore<AppSettings> settingsFile,
-        IAutoStart autoStart, GhCommandRunner gh)
+        IAutoStart autoStart, GhCommandRunner gh, UpdateService updates)
     {
         _store = store;
         _stars = stars;
@@ -245,6 +246,7 @@ public sealed partial class MainViewModel : ObservableObject
         _settingsFile = settingsFile;
         _autoStart = autoStart;
         _gh = gh;
+        _updates = updates;
         _startAtLogin = autoStart.IsEnabled();
         NeedsYou = new(PrBucket.NeedsYou, ReviewFilter);
         WaitingOnOthers = new(PrBucket.WaitingOnOthers, ReviewFilter);
@@ -280,6 +282,10 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<NotificationRecord> Notifications { get; } = [];
     public static string DataDirectory => AppPaths.DataDirectory;
     public bool AutoStartSupported => _autoStart.IsSupported;
+    public static string CurrentVersion => UpdateService.CurrentDisplay;
+
+    /// <summary>Windows installs in place and comes back; macOS can only put the disk image on screen.</summary>
+    public static string UpdateActionLabel => OperatingSystem.IsWindows() ? "Install and restart" : "Download update";
 
     [ObservableProperty] public partial string Summary { get; set; } = "Loading…";
     [ObservableProperty] public partial TrayState TrayState { get; set; }
@@ -288,6 +294,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] public partial bool ShowDismissed { get; set; }
     [ObservableProperty] public partial string NotificationsHeader { get; set; } = "Notifications";
     [ObservableProperty] public partial string GhPath { get; set; } = "checking…";
+    [ObservableProperty] public partial string UpdateStatus { get; set; } = string.Empty;
+    [ObservableProperty] public partial bool UpdateAvailable { get; set; }
+    [ObservableProperty] public partial bool IsInstallingUpdate { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasBanner))]
@@ -409,6 +418,51 @@ public sealed partial class MainViewModel : ObservableObject
     public static void OpenNotification(NotificationRecord record) => Browser.Open(record.Url);
     public static void OpenDataFolder() => Browser.OpenFolder(DataDirectory);
 
+    /// <summary>The unforced call comes from the poll loop; the service is what keeps it to once a day.</summary>
+    public async Task CheckForUpdatesAsync(bool force)
+    {
+        if (force)
+        {
+            UpdateStatus = "Checking…";
+        }
+
+        try
+        {
+            UpdateAvailable = await Task.Run(() => _updates.CheckAsync(force));
+            UpdateStatus = UpdateAvailable ? $"Version {_updates.AvailableTag} is available" : "Up to date";
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus = ex is GhException gh ? gh.UserMessage : ex.Message;
+        }
+    }
+
+    /// <summary>On Windows this is the last thing the application does: the installer needs it gone.</summary>
+    public async Task InstallUpdateAsync()
+    {
+        // Two buttons offer this, and a second run would download over the first one's installer.
+        if (IsInstallingUpdate)
+        {
+            return;
+        }
+
+        IsInstallingUpdate = true;
+        UpdateStatus = "Downloading…";
+        try
+        {
+            await Task.Run(() => _updates.InstallAsync());
+            UpdateStatus = OperatingSystem.IsWindows() ? "Installing…" : "Drag the new version to Applications to finish";
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus = ex is GhException gh ? gh.UserMessage : ex.Message;
+        }
+        finally
+        {
+            IsInstallingUpdate = false;
+        }
+    }
+
     public void RecheckGh()
     {
         _gh.Invalidate();
@@ -478,6 +532,11 @@ public sealed partial class MainViewModel : ObservableObject
         Banner = _poller.LastError?.UserMessage ?? _localMessage ?? string.Empty;
         LastChecked = _poller.LastSuccess is { } t ? $"Last checked {t:t}" : string.Empty;
         RefreshTrayState();
+
+        if (_poller.LastSuccess is not null)
+        {
+            _ = CheckForUpdatesAsync(force: false);
+        }
     }
 
     /// <summary>

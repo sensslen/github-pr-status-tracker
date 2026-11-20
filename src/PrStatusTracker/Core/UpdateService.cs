@@ -12,7 +12,8 @@ namespace PrStatusTracker.Core;
 /// </summary>
 public sealed class UpdateService(GhCommandRunner gh, Action shutdown)
 {
-    public const string Repo = "renewedvision/github-pr-status-tracker";
+    /// <summary>Releases come from here since the renewedvision repository was archived after v0.0.3.</summary>
+    public const string Repo = "sensslen/github-pr-status-tracker";
 
     private static readonly TimeSpan s_checkInterval = TimeSpan.FromHours(24);
     private static readonly Version s_sourceBuild = new(0, 0, 0);

@@ -7,7 +7,7 @@ namespace PrStatusTracker.Tests;
 public class PrFilterTests
 {
     private static readonly Models.PullRequest s_sample =
-        Pr(number: 42, author: "Alice", repo: "acme/widgets", title: "Fix the uploader retry", labels: ["bug", "Backend"]);
+        Pr(number: 42, author: "Alice", repo: "acme/widgets", title: "Fix the uploader retry", labels: ["bug", "Backend"]) with { BaseBranch = "release/7.1" };
 
     [Fact]
     public void Empty_filter_matches_everything()
@@ -22,8 +22,9 @@ public class PrFilterTests
     [InlineData("alice")]      // author
     [InlineData("backend")]    // label
     [InlineData("#42")]        // number
+    [InlineData("RELEASE/7")]  // target branch
     [InlineData("  retry  ")]  // surrounding whitespace ignored
-    public void Free_text_matches_title_repo_author_label_and_number(string text) =>
+    public void Free_text_matches_title_repo_author_label_number_and_target_branch(string text) =>
         Assert.True(new PrFilter(Text: text).Matches(s_sample));
 
     [Fact]

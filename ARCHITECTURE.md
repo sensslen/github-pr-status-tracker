@@ -178,12 +178,10 @@ failed or missing page fails the poll rather than reporting no work.
 Only thread state matters; comment timestamps and local read history are not fetched or stored.
 
 **What a poll costs:** the search is 6 GraphQL points and one `gh` process. The thread query is
-one more process and about half a point per PR in it, plus 1 per later page. A PR with nothing
-waiting on you is left out for the next `GitHubClient.QuietReuses` polls unless its `updatedAt`
-moves, which a new comment or review does. Resolving or reopening a thread is not guaranteed to
-move `updatedAt`, so a PR with open threads is checked every poll, and a reopened thread shows
-up within `QuietReuses + 1` polls. So a poll costs 6 points, plus about half a point per PR with
-open threads, new activity or an expired quiet answer: at most about 31 with 50 authored PRs. The
+one more process and about half a point per PR in it, plus 1 per later page. Every poll reads the
+threads of every authored PR, and no earlier answer is reused: resolving or reopening a thread is
+not guaranteed to move `updatedAt`, so the app's state always comes from GitHub's current state.
+So a poll costs at most about 31 points with 50 authored PRs. The
 5,000 points/hour budget belongs to the whole `gh` login, so it is shared with everything else
 using it.
 
@@ -267,10 +265,18 @@ strip above the rows.
 A PR that appears in both lists (you authored it *and* were asked to review it) is shown
 once, under the authored rules.
 
+GitHub returns `reviewDecision: null` on some PRs that carry a standing approval
+(renewedvision/friday#17598, approved by CodeRabbit on its head commit). When it is null, the
+decision is read from each reviewer's standing verdict, the same verdicts the review chips show:
+any change request gives `CHANGES_REQUESTED`, otherwise any approval gives `APPROVED`. A
+non-null `reviewDecision` always wins.
+
 The sixth callout, **open threads**, comes from `PullRequest.HasOpenThreads`. It can appear
 alongside a status callout, so failing checks and an unanswered thread count under both in
-the strip. The status callout leads. The summary and tray count work across all callouts,
-including open threads on an otherwise ready-to-merge PR.
+the strip. The status callout leads. The one exception is `ReadyToMerge`: a PR with any
+unresolved thread, including one waiting on a reviewer (`PullRequest.HasUnresolvedThreads`),
+cannot merge where the branch requires conversation resolution, so its only callout is
+**open threads**. Unresolved threads waiting on a reviewer stay quiet on every other status.
 
 `PrCallout` is declared in the order the tab sorts by — `ReadyToMerge`, `ChecksFailing`,
 `MergeConflict`, `ChangesRequested`, `OpenThreads`, `NoReviewers` — so the merge button comes
@@ -443,7 +449,9 @@ Tabs:
    review rows therefore stay together ahead of ordinary drafts within each star partition.
    Stars pin above all statuses in their repository, not above other repository sections.
    Each section uses a native `Expander`, expanded by default. Its per-tab repository view model
-   keeps expansion state across polls and filtering for the current app session. Collapsing hides
+   keeps expansion state across polls and filtering. Collapsed repository names are saved per tab in
+   `settings.json` (`CollapsedRepositories`) on every toggle and restored at startup, including names
+   with no rows at the moment, so a section stays collapsed when its next PR arrives. Collapsing hides
    every row, including stars, but leaves the header and tab counts/attention unchanged.
    Headers are 24 logical pixels tall, with a small chevron to the left of the repository name,
    theme foreground, and no filled background or border. The chevron points right when collapsed

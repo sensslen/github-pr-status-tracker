@@ -3,7 +3,8 @@
 namespace PrStatusTracker.Core;
 
 /// <summary>
-/// What the main window is currently narrowed to. Free text matches title, repo, author, labels and number;
+/// What the main window is currently narrowed to. Free text matches title, repo, author, labels, number and
+/// target branch;
 /// the three exact fields come from dropdowns. Null means "any".
 /// </summary>
 public sealed record PrFilter(string Text = "", string? Author = null, string? Label = null, string? Repo = null)
@@ -37,7 +38,7 @@ public sealed record PrFilter(string Text = "", string? Author = null, string? L
 
         return Has(pr.Title, text) || Has(pr.Repo, text) || Has(pr.Author, text)
             || pr.Labels.Any(l => Has(l, text))
-            || Has($"#{pr.Number}", text);
+            || Has($"#{pr.Number}", text) || Has(pr.BaseBranch, text);
     }
 
     private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);

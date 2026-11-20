@@ -22,15 +22,16 @@ internal static class TestData
         IReadOnlyList<string>? labels = null,
         string repo = "org/repo",
         string? title = null,
-        bool openThreads = false) =>
+        bool openThreads = false,
+        bool unresolvedThreads = false) =>
         new(repo, number, title ?? $"PR {number}", $"https://github.com/{repo}/pull/{number}", draft, author,
             CreatedAt: T0.AddDays(-1), UpdatedAt: T0, Additions: 10, Deletions: 2, Labels: labels ?? [],
             decision, mergeable, requested ?? [], reviews ?? [], committed ?? T0, checks,
-            HasOpenThreads: openThreads);
+            HasOpenThreads: openThreads, HasUnresolvedThreads: unresolvedThreads);
 
     public static TrackedPr Tracked(PrStatus status, int number = 1, string author = Other,
-        bool openThreads = false) =>
-        new(Pr(number: number, author: author, openThreads: openThreads), status);
+        bool openThreads = false, bool unresolvedThreads = false) =>
+        new(Pr(number: number, author: author, openThreads: openThreads, unresolvedThreads: unresolvedThreads), status);
 
     /// <summary>A fresh path in the tests' scratch directory. Nothing is created until something writes there.</summary>
     public static string TempPath() => Path.Combine(Path.GetTempPath(), "prst-tests", Guid.NewGuid() + ".json");

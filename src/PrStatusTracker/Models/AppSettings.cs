@@ -25,5 +25,11 @@ public sealed class AppSettings
     /// </summary>
     public bool HideTeamOnlyRequests { get; set; }
 
+    /// <summary>
+    /// The repository sections collapsed on each PR tab, keyed by bucket name, so the tabs reopen the way they
+    /// were left. A settings file written before it existed has no such key and opens every section.
+    /// </summary>
+    public Dictionary<string, List<string>> CollapsedRepositories { get; set; } = [];
+
     public TimeSpan PollInterval => TimeSpan.FromMinutes(PollIntervalMinutes);
 }

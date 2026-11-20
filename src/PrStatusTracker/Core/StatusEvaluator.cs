@@ -62,7 +62,8 @@ public static class StatusEvaluator
 
         // Everything a PR needs to be mergeable, short of actually merging cleanly. One expression so the
         // conflicted and unconflicted variants below cannot drift apart.
-        var ready = pr.ReviewDecision == ReviewDecision.Approved && green;
+        var decision = pr.EffectiveReviewDecision;
+        var ready = decision == ReviewDecision.Approved && green;
 
         if (pr.Mergeable == Mergeable.Conflicting)
         {
@@ -77,12 +78,12 @@ public static class StatusEvaluator
             return PrStatus.ChecksFailing;
         }
 
-        if (pr.ReviewDecision == ReviewDecision.ChangesRequested)
+        if (decision == ReviewDecision.ChangesRequested)
         {
             return PrStatus.ChangesRequested;
         }
 
-        if (pr.ReviewDecision == ReviewDecision.Approved)
+        if (decision == ReviewDecision.Approved)
         {
             return ready ? PrStatus.ReadyToMerge : PrStatus.ApprovedChecksPending;
         }

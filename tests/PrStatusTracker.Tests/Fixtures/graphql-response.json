@@ -10,7 +10,9 @@
           "isDraft": false,
           "updatedAt": "2026-09-14T09:05:00Z",
           "author": { "login": "alice" },
-          "repository": { "nameWithOwner": "acme/widgets" },
+          "baseRefName": "release/2.0",
+          "headRefName": "alice/retry",
+          "repository": { "nameWithOwner": "acme/widgets", "defaultBranchRef": { "name": "main" } },
           "labels": { "nodes": [ { "name": "bug" }, { "name": "backend" } ] },
           "reviewDecision": "REVIEW_REQUIRED",
           "mergeable": "MERGEABLE",
@@ -19,6 +21,7 @@
             { "requestedReviewer": { "name": "platform-team" } }
           ] },
           "latestReviews": { "nodes": [] },
+          "latestOpinionatedReviews": { "nodes": [ { "author": { "login": "owen" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-09-13T09:00:00Z" } ] },
           "commits": { "nodes": [ { "commit": { "committedDate": "2026-09-14T09:00:00Z", "statusCheckRollup": { "state": "PENDING" } } } ] }
         },
         {

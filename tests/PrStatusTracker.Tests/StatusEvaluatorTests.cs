@@ -90,6 +90,22 @@ public class StatusEvaluatorTests
     public void Author_approved_with_no_checks_is_ready() =>
         Assert.Equal(PrStatus.ReadyToMerge, StatusEvaluator.Evaluate(Pr(author: Me, decision: ReviewDecision.Approved, checks: null), Me));
 
+    /// <summary>GitHub leaves the decision null on some approved PRs; the standing approval still counts.</summary>
+    [Fact]
+    public void Author_approval_without_a_decision_is_ready() =>
+        Assert.Equal(PrStatus.ReadyToMerge, StatusEvaluator.Evaluate(Pr(author: Me, requested: [Other],
+            reviews: [new Review(Other, ReviewState.Commented, T0), new Review("coderabbitai", ReviewState.Approved, T0)]), Me));
+
+    [Fact]
+    public void Author_change_request_without_a_decision_outweighs_approval() =>
+        Assert.Equal(PrStatus.ChangesRequested, StatusEvaluator.Evaluate(Pr(author: Me, reviews:
+            [new Review(Other, ReviewState.ChangesRequested, T0), new Review("coderabbitai", ReviewState.Approved, T0)]), Me));
+
+    [Fact]
+    public void Author_decision_from_github_wins_over_reviews() =>
+        Assert.Equal(PrStatus.AwaitingReview, StatusEvaluator.Evaluate(Pr(author: Me, decision: ReviewDecision.ReviewRequired,
+            reviews: [new Review("coderabbitai", ReviewState.Approved, T0)]), Me));
+
     [Fact]
     public void Author_approved_checks_pending() =>
         Assert.Equal(PrStatus.ApprovedChecksPending,

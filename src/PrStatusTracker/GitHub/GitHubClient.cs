@@ -15,16 +15,6 @@ public sealed class GitHubClient : IGitHubClient
 {
     private readonly Func<IReadOnlyList<string>, CancellationToken, Task<GhResult>> _run;
 
-    /// <summary>
-    /// How many more polls a "nothing waiting" answer is reused for. Reopening a thread is not guaranteed to move
-    /// updatedAt, so the answer has to expire for a reopened thread to come back.
-    /// </summary>
-    internal const int QuietReuses = 4;
-
-    private Dictionary<string, Quiet> _quiet = [];
-
-    private sealed record Quiet(DateTimeOffset UpdatedAt, int ReusesLeft);
-
     public GitHubClient(GhCommandRunner gh) : this(gh.RunAsync) { }
 
     internal GitHubClient(Func<IReadOnlyList<string>, CancellationToken, Task<GhResult>> run) => _run = run;
@@ -53,46 +43,35 @@ public sealed class GitHubClient : IGitHubClient
         ], ct);
 
         var data = ParseData(result.StdOut);
-        var updatedAt = (data[Queries.AuthoredAlias]?["nodes"]?.AsArray() ?? [])
-            .Where(pr => pr?["id"] is not null)
-            .ToDictionary(
-                pr => pr!["id"]!.GetValue<string>(),
-                pr => pr!["updatedAt"]?.GetValue<DateTimeOffset>() ?? DateTimeOffset.MinValue);
+        var authored = (data[Queries.AuthoredAlias]?["nodes"]?.AsArray() ?? [])
+            .Select(pr => pr?["id"]?.GetValue<string>())
+            .OfType<string>()
+            .ToList();
 
-        var quiet = new Dictionary<string, Quiet>();
-        var ask = new List<string>();
-        foreach (var (id, at) in updatedAt)
-        {
-            if (_quiet.TryGetValue(id, out var q) && q.UpdatedAt == at && q.ReusesLeft > 0)
-            {
-                quiet[id] = q with { ReusesLeft = q.ReusesLeft - 1 };
-            }
-            else
-            {
-                ask.Add(id);
-            }
-        }
-
+        // Every poll reads every authored PR's threads afresh: resolving or reopening a thread does not reliably
+        // move updatedAt, so no earlier answer can stand in for the current one.
         var open = new HashSet<string>();
-        foreach (var (id, isOpen) in await CheckThreadsAsync(ask, login, ct))
+        var unresolved = new HashSet<string>();
+        foreach (var (id, isOpen, anyUnresolved) in await CheckThreadsAsync(authored, login, ct))
         {
             if (isOpen)
             {
                 open.Add(id);
             }
-            else
+
+            if (anyUnresolved)
             {
-                quiet[id] = new Quiet(updatedAt[id], QuietReuses);
+                unresolved.Add(id);
             }
         }
 
-        _quiet = quiet;
-        return MapResponse(data, open);
+        return MapResponse(data, open, unresolved);
     }
 
-    private async Task<List<(string Id, bool Open)>> CheckThreadsAsync(IReadOnlyList<string> ids, string viewer, CancellationToken ct)
+    private async Task<List<(string Id, bool Open, bool Unresolved)>> CheckThreadsAsync(
+        IReadOnlyList<string> ids, string viewer, CancellationToken ct)
     {
-        var results = new List<(string, bool)>();
+        var results = new List<(string, bool, bool)>();
         if (ids.Count == 0)
         {
             return results;
@@ -103,6 +82,7 @@ public sealed class GitHubClient : IGitHubClient
             var threads = first;
             string? cursor = null;
             var isOpen = HasActionable(threads, viewer);
+            var anyUnresolved = HasUnresolved(threads);
             while (!isOpen && threads["pageInfo"]?["hasNextPage"]?.GetValue<bool>() == true)
             {
                 var next = threads["pageInfo"]?["endCursor"]?.GetValue<string>()
@@ -110,9 +90,10 @@ public sealed class GitHubClient : IGitHubClient
                 cursor = next != cursor ? next : throw new JsonException("Review-thread cursor did not advance");
                 threads = (await ThreadPagesAsync([id], cursor, ct)).Single().Threads;
                 isOpen = HasActionable(threads, viewer);
+                anyUnresolved |= HasUnresolved(threads);
             }
 
-            results.Add((id, isOpen));
+            results.Add((id, isOpen, anyUnresolved || isOpen));
         }
 
         return results;
@@ -145,9 +126,11 @@ public sealed class GitHubClient : IGitHubClient
         return root["data"] ?? throw new JsonException("no data in response");
     }
 
-    internal static IReadOnlyList<PullRequest> ParseResponse(string json) => MapResponse(ParseData(json), new HashSet<string>());
+    internal static IReadOnlyList<PullRequest> ParseResponse(string json) =>
+        MapResponse(ParseData(json), new HashSet<string>(), new HashSet<string>());
 
-    private static IReadOnlyList<PullRequest> MapResponse(JsonNode data, IReadOnlySet<string> withOpenThreads)
+    private static IReadOnlyList<PullRequest> MapResponse(
+        JsonNode data, IReadOnlySet<string> withOpenThreads, IReadOnlySet<string> withUnresolvedThreads)
     {
         // Authored takes precedence when a PR appears in more than one list.
         var byKey = new Dictionary<string, PullRequest>();
@@ -165,12 +148,15 @@ public sealed class GitHubClient : IGitHubClient
                     continue; // non-PR search hits have no fields
                 }
 
-                var pr = MapPullRequest(node, withOpenThreads);
+                var pr = MapPullRequest(node, withOpenThreads, withUnresolvedThreads);
                 byKey[pr.Key] = pr;
             }
         }
         return [.. byKey.Values];
     }
+
+    private static bool HasUnresolved(JsonNode threads) =>
+        threads["nodes"] is JsonArray nodes && nodes.Any(thread => thread?["isResolved"]?.GetValue<bool>() == false);
 
     private static bool HasActionable(JsonNode threads, string viewer) =>
         threads["nodes"] is JsonArray nodes && nodes.Any(thread => IsActionable(thread, viewer));
@@ -182,8 +168,28 @@ public sealed class GitHubClient : IGitHubClient
             .LastOrDefault(c => c?["state"]?.GetValue<string>() != "PENDING")?["author"]?["login"]?.GetValue<string>() is { } by
         && !string.Equals(by, viewer, StringComparison.OrdinalIgnoreCase);
 
-    private static PullRequest MapPullRequest(JsonNode n, IReadOnlySet<string> withOpenThreads)
+    private static List<Review> ParseReviews(JsonNode? connection)
     {
+        var reviews = new List<Review>();
+        foreach (var r in connection?["nodes"]?.AsArray() ?? [])
+        {
+            var author = r?["author"]?["login"]?.GetValue<string>();
+            var submitted = r?["submittedAt"]?.GetValue<DateTimeOffset?>();
+            if (author is null || submitted is null)
+            {
+                continue;
+            }
+
+            reviews.Add(new Review(author, ParseEnum(r!["state"], ReviewState.Commented), submitted.Value));
+        }
+
+        return reviews;
+    }
+
+    private static PullRequest MapPullRequest(
+        JsonNode n, IReadOnlySet<string> withOpenThreads, IReadOnlySet<string> withUnresolvedThreads)
+    {
+        var id = n["id"]?.GetValue<string>();
         var reviewers = new List<string>();
         foreach (var r in n["reviewRequests"]?["nodes"]?.AsArray() ?? [])
         {
@@ -195,23 +201,8 @@ public sealed class GitHubClient : IGitHubClient
             }
         }
 
-        var reviews = new List<Review>();
-        foreach (var r in n["latestReviews"]?["nodes"]?.AsArray() ?? [])
-        {
-            if (r is null)
-            {
-                continue;
-            }
-
-            var author = r["author"]?["login"]?.GetValue<string>();
-            var submitted = r["submittedAt"]?.GetValue<DateTimeOffset?>();
-            if (author is null || submitted is null)
-            {
-                continue;
-            }
-
-            reviews.Add(new Review(author, ParseEnum(r["state"], ReviewState.Commented), submitted.Value));
-        }
+        var reviews = ParseReviews(n["latestReviews"]);
+        var standing = ParseReviews(n["latestOpinionatedReviews"]);
 
         var commit = n["commits"]?["nodes"]?.AsArray().FirstOrDefault()?["commit"];
         var rollup = commit?["statusCheckRollup"]?["state"]?.GetValue<string>();
@@ -235,6 +226,7 @@ public sealed class GitHubClient : IGitHubClient
             Mergeable: ParseEnum(n["mergeable"], Mergeable.Unknown),
             RequestedReviewers: reviewers,
             LatestReviews: reviews,
+            StandingReviews: standing,
             HeadCommittedAt: commit?["committedDate"]?.GetValue<DateTimeOffset?>(),
             Checks: rollup switch
             {
@@ -243,7 +235,11 @@ public sealed class GitHubClient : IGitHubClient
                 "FAILURE" or "ERROR" => CheckState.Failure,
                 _ => CheckState.Pending, // PENDING, EXPECTED
             },
-            HasOpenThreads: n["id"]?.GetValue<string>() is { } id && withOpenThreads.Contains(id));
+            HasOpenThreads: id is not null && withOpenThreads.Contains(id),
+            HasUnresolvedThreads: id is not null && withUnresolvedThreads.Contains(id),
+            BaseBranch: n["baseRefName"]?.GetValue<string>() ?? string.Empty,
+            HeadBranch: n["headRefName"]?.GetValue<string>() ?? string.Empty,
+            DefaultBranch: n["repository"]?["defaultBranchRef"]?["name"]?.GetValue<string>() ?? string.Empty);
     }
 
     private static TEnum ParseEnum<TEnum>(JsonNode? node, TEnum fallback) where TEnum : struct, Enum

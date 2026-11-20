@@ -14,7 +14,8 @@ internal static class Queries
         fragment PrFields on PullRequest {
           id number title url isDraft createdAt updatedAt additions deletions
           author { login }
-          repository { nameWithOwner }
+          baseRefName headRefName
+          repository { nameWithOwner defaultBranchRef { name } }
           labels(first: 10) { nodes { name } }
           reviewDecision
           mergeable
@@ -23,6 +24,7 @@ internal static class Queries
             ... on Team { name }
           } } }
           latestReviews(first: 20) { nodes { author { login } state submittedAt } }
+          latestOpinionatedReviews(first: 20) { nodes { author { login } state submittedAt } }
           commits(last: 1) { nodes { commit {
             committedDate
             statusCheckRollup { state }
@@ -31,7 +33,7 @@ internal static class Queries
         """;
 
     // A search result's nested connections are charged for every PR it returns, so threads are fetched only for
-    // the PRs GitHubClient cannot reuse the last answer for, all in one request. Your own pending replies come
+    // the PRs you authored, all in one request. Your own pending replies come
     // back too, hence `last: 5` to see past them to the last submitted comment.
     public const string ReviewThreads = """
         query($ids: [ID!]!, $cursor: String) {

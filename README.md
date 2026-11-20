@@ -23,8 +23,18 @@ It answers one question, quickly, without opening a browser:
 - **Groups every PR tab by repository**, alphabetically. Within each repository, stars come
   first, then action callouts, then status, with ordinary drafts after awaiting review.
   Ties sort oldest first, then by PR number. Repository sections start expanded; collapse a
-  header to hide its rows. Each tab remembers collapsed sections across refreshes and filters
-  until the app exits. Collapsing never changes counts or attention indicators.
+  header to hide its rows. Each tab remembers collapsed sections across refreshes, filters and
+  restarts. Collapsing never changes counts or attention indicators.
+- **Shows the branch each PR merges into** as a `→ main` chip, with the source branch in its tooltip.
+  The chip turns orange when the target is not the repository's default branch, such as a release
+  branch or another PR's branch.
+- **Shows where reviews stand at a glance.** A *Reviews* chip sums up the people: ✓ approved, ✗ changes
+  requested, … waiting on reviewers, 💬 comments only, – nobody asked; it names whoever requested changes, and its tooltip names who said what.
+  CodeRabbit gets its own chip with the same symbols, so a bot approval never reads as a person's. A
+  change request still counts after you re-request that reviewer, since GitHub keeps it blocking.
+- **Tints cards by what they want from you.** Green: ready to merge, approved by a person (not only
+  CodeRabbit), into the default branch. Orange: something you can act on, meaning open threads awaiting
+  your reply or a change request whose reviewer you have not asked to look again; orange wins over green. Everything else, including ready PRs into another branch, stays plain.
 - **Lets you star the PRs you're actively reviewing** — starred PRs sort to the top of
   their repository, above every status. The star is local to the app; nothing is sent to GitHub.
 - **Flags open review threads awaiting your reply** on your own PRs. A thread counts while it is
@@ -32,6 +42,9 @@ It answers one question, quickly, without opening a browser:
   A PR with nothing else outstanding says *Open threads* on an orange status pill; otherwise an
   orange 💬 sits beside it. Opening the PR does not clear outstanding work. Issue comments, review
   summaries and unrelated updates do not trigger this marker. Notifications remain separate.
+  An approved, green PR with any unresolved thread, even one waiting on a reviewer, says *Open
+  threads* instead of *Ready to merge*, since a branch that requires conversation resolution will
+  not merge it.
 - **Keeps a notification history** — every notification is written to disk so you can
   dismiss it, come back to it later, and see what you missed while away.
 
@@ -46,7 +59,7 @@ It answers one question, quickly, without opening a browser:
 | Main window | Tabs per bucket (*Needs you*, *Waiting on others*, *Your PRs*), plus Notifications and Settings; every row opens its PR |
 | Your PRs tab | Everything you authored, whatever state it's in. A strip above the rows counts what's calling for attention (`2 ready to merge · 1 CI failing`). Within each repository, callouts come first inside the starred and unstarred groups |
 | Star a row (☆) | Pins that PR above unstarred rows in its repository; persists across restarts. Click ★ again to unstar |
-| Filter bar | On every PR tab: free text (title, repo, author, label, `#number`) plus label / repo dropdowns, and author where there's more than one. *Needs you* and *Waiting on others* share a bar; *Your PRs* has its own, so narrowing one never narrows the other. Never affects the tray |
+| Filter bar | On every PR tab: free text (title, repo, author, label, target branch, `#number`) plus label / repo dropdowns, and author where there's more than one. *Needs you* and *Waiting on others* share a bar; *Your PRs* has its own, so narrowing one never narrows the other. Never affects the tray |
 | Toast notification | One toast per poll, however many PRs changed; clicking it opens the PR (or GitHub's PR list for a batch) |
 | Notification centre (in-app) | Persisted, dismissible list of past notifications |
 

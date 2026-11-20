@@ -42,6 +42,11 @@ public class GitHubClientParseTests
         Assert.Equal(CheckState.Pending, review.Checks);
         Assert.Equal(new DateTimeOffset(2026, 9, 14, 9, 0, 0, TimeSpan.Zero), review.HeadCommittedAt);
         Assert.False(review.HasOpenThreads);
+        Assert.Equal(("release/2.0", "alice/retry", "main"), (review.BaseBranch, review.HeadBranch, review.DefaultBranch));
+        Assert.True(review.TargetsNonDefaultBranch);
+        Assert.Empty(review.LatestReviews);
+        var standing = Assert.Single(review.StandingReviews);
+        Assert.Equal(("owen", ReviewState.ChangesRequested), (standing.Author, standing.State));
 
         var authored = Assert.Single(prs, p => p.Number == 7);
         Assert.Equal("owen", authored.Author);
@@ -53,6 +58,8 @@ public class GitHubClientParseTests
         var r = Assert.Single(authored.LatestReviews);
         Assert.Equal(("bob", ReviewState.Approved), (r.Author, r.State));
         Assert.True(authored.HasOpenThreads);
+        Assert.Equal(string.Empty, authored.BaseBranch);
+        Assert.False(authored.TargetsNonDefaultBranch);
 
         // #42 appears in both search results; the authored copy (with the newer title) wins.
         var both = Assert.Single(prs, p => p.Number == 42);
@@ -164,47 +171,48 @@ public class GitHubClientParseTests
         await Assert.ThrowsAsync<JsonException>(() => client.FetchPullRequestsAsync(Me));
     }
 
-    public class Reuse
+    [Fact]
+    public async Task A_thread_waiting_on_a_reviewer_is_unresolved_but_not_yours()
     {
+        var pr = await Fetch(Threads(Thread(resolved: false, Me)));
+
+        Assert.False(pr.HasOpenThreads);
+        Assert.True(pr.HasUnresolvedThreads);
+    }
+
+    [Fact]
+    public async Task Resolved_threads_leave_nothing_unresolved()
+    {
+        var pr = await Fetch(Threads(Thread(resolved: true, Me)));
+
+        Assert.False(pr.HasUnresolvedThreads);
+    }
+
+    public class Polling
+    {
+        /// <summary>Thread resolution can change without moving updatedAt, so every poll reads the threads afresh.</summary>
         [Fact]
-        public async Task A_quiet_pr_is_not_asked_again_until_it_changes()
+        public async Task Every_poll_reads_the_threads_of_an_unchanged_pr()
         {
             var calls = new List<IReadOnlyList<string>>();
-            var client = Client(calls,
-                new Queue<string>([Search("2026-09-21T09:00:00Z"), Search("2026-09-21T09:00:00Z"), Search("2026-09-21T10:00:00Z")]),
-                new Queue<string>([Threads(Thread(resolved: true, Other)), Threads(Thread(resolved: false, Other))]));
+            var client = Client(calls, new Queue<string>([Search(), Search(), Search()]),
+                new Queue<string>([Threads(Thread(resolved: true, Other)), Threads(Thread(resolved: false, Other)),
+                    Threads(Thread(resolved: true, Other))]));
 
             Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            Assert.Equal(3, calls.Count);
             Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            Assert.Equal(5, calls.Count);
+            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
+            Assert.Equal(6, calls.Count);
         }
 
         [Fact]
-        public async Task Resolving_a_thread_clears_it_without_new_activity()
+        public async Task A_thread_left_waiting_on_a_reviewer_is_reported_on_every_poll()
         {
             var client = Client([], new Queue<string>([Search(), Search()]),
-                new Queue<string>([Threads(Thread(resolved: false, Other)), Threads(Thread(resolved: true, Other))]));
+                new Queue<string>([Threads(Thread(resolved: false, Me)), Threads(Thread(resolved: false, Me))]));
 
-            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-        }
-
-        [Fact]
-        public async Task Reopening_a_thread_brings_it_back_once_the_quiet_answer_expires()
-        {
-            var calls = new List<IReadOnlyList<string>>();
-            var client = Client(calls, new Queue<string>(Enumerable.Repeat(Search(), GitHubClient.QuietReuses + 2)),
-                new Queue<string>([Threads(Thread(resolved: true, Other)), Threads(Thread(resolved: false, Other))]));
-
-            for (var poll = 0; poll <= GitHubClient.QuietReuses; poll++)
-            {
-                Assert.False(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            }
-
-            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasOpenThreads);
-            Assert.Equal(GitHubClient.QuietReuses + 4, calls.Count);
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasUnresolvedThreads);
+            Assert.True(Assert.Single(await client.FetchPullRequestsAsync(Me)).HasUnresolvedThreads);
         }
     }
 

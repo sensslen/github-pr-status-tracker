@@ -330,4 +330,68 @@ public class PrGroupViewModelTests
         Assert.False(filter.Current.IsActive);
         Assert.Equal(2, changes); // the edit, then the clear
     }
+
+    [Fact]
+    public void Restored_collapsed_sections_start_collapsed_and_others_expanded()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        group.RestoreCollapsed(["org/folded", "org/absent"]);
+        group.Replace([Item(Me, 1, "org/folded"), Item(Me, 2, "org/open")]);
+
+        Assert.Equal([false, true], group.Repositories.Select(r => r.IsExpanded));
+    }
+
+    [Fact]
+    public void Toggling_a_section_reports_the_collapsed_set_including_absent_repositories()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        group.RestoreCollapsed(["org/absent"]);
+        group.Replace([Item(Me, 1, "org/a"), Item(Me, 2, "org/b")]);
+        var raised = 0;
+        group.CollapseChanged += () => raised++;
+
+        group.Repositories[0].IsExpanded = false;
+        Assert.Equal(1, raised);
+        Assert.Equal(["org/a", "org/absent"], group.Collapsed.Order(StringComparer.Ordinal));
+
+        group.Repositories[0].IsExpanded = true;
+        Assert.Equal(2, raised);
+        Assert.Equal(["org/absent"], group.Collapsed);
+    }
+
+    [Fact]
+    public void A_refresh_does_not_report_a_collapse_change()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        group.RestoreCollapsed(["org/a"]);
+        var raised = 0;
+        group.CollapseChanged += () => raised++;
+
+        group.Replace([Item(Me, 1, "org/a")]);
+        group.Replace([Item(Me, 1, "org/a"), Item(Me, 2, "org/a")]);
+
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public void Collapsed_repositories_survive_a_settings_round_trip()
+    {
+        var path = TempPath();
+        var file = new Core.JsonFileStore<AppSettings>(path);
+        file.Save(new AppSettings { CollapsedRepositories = { ["YourPrs"] = ["org/a", "org/b"] } });
+
+        var loaded = new Core.JsonFileStore<AppSettings>(path).Load(() => new AppSettings());
+        Assert.Equal(["org/a", "org/b"], loaded.CollapsedRepositories["YourPrs"]);
+    }
+
+    [Fact]
+    public void A_settings_file_without_collapsed_repositories_loads_empty()
+    {
+        var path = TempPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """{ "PollIntervalMinutes": 3 }""");
+
+        var loaded = new Core.JsonFileStore<AppSettings>(path).Load(() => new AppSettings());
+        Assert.Empty(loaded.CollapsedRepositories);
+    }
 }

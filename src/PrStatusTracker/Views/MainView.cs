@@ -35,6 +35,13 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
                 new TabControl
                 {
                     Padding = new Thickness(0),
+                    // Fluent's 24 pt headers wrap all five tabs onto two lines at the default window width.
+                    Resources =
+                    {
+                        ["TabItemHeaderFontSize"] = 17.0,
+                        ["TabItemHeaderMinHeight"] = 36.0,
+                        ["TabItemMinHeight"] = 36.0,
+                    },
                     Items =
                 {
                     BucketTab(vm, vm.NeedsYou),
@@ -61,6 +68,11 @@ internal static class ViewHelpers
     public static readonly IBrush StarBrush = new ImmutableSolidColorBrush(Color.Parse("#E3B341"));
     public static readonly IBrush AccentBrush = new ImmutableSolidColorBrush(Color.Parse("#0969DA"));
     public static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#14808080"));
+    public static readonly IBrush GoodCardBrush = new ImmutableSolidColorBrush(Color.Parse("#242DA44E"));
+    public static readonly IBrush AttentionCardBrush = new ImmutableSolidColorBrush(Color.Parse("#26DB6D28"));
+    public static readonly IBrush ChipBrush = new ImmutableSolidColorBrush(Color.Parse("#1F808080"));
+    public static readonly IBrush WarnChipBrush = new ImmutableSolidColorBrush(Color.Parse("#26DB6D28"));
+    public static readonly FontFamily MonoFont = new("Cascadia Mono, Consolas, Menlo, monospace");
     public static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
     public static FuncDataTemplate<T> Template<T>(Func<T, Control> build) => new((item, _) => build(item), supportsRecycling: false);
@@ -102,7 +114,7 @@ internal static class ViewHelpers
     public static Button StarToggle(MainViewModel vm, PrItemViewModel item)
     {
         var button = new Button()
-            .Content(new TextBlock().Text(item.IsStarred ? "★" : "☆").FontSize(14)
+            .Content(new TextBlock().Text(item.IsStarred ? "★" : "☆").FontSize(16)
                 .Foreground(item.IsStarred ? StarBrush : NeutralBrush)
                 .Opacity(item.IsStarred ? 1 : 0.55))
             .Background(Brushes.Transparent).BorderThickness(0).Padding(2, 0).Cursor(HandCursor)
@@ -115,10 +127,10 @@ internal static class ViewHelpers
     public static Border Pill(string text, IBrush background) =>
         new Border()
             .Background(background)
-            .CornerRadius(9)
-            .Padding(7, 1)
+            .CornerRadius(10)
+            .Padding(9, 2)
             .VerticalAlignment(VerticalAlignment.Center)
-            .Child(new TextBlock().Text(text).FontSize(10.5).Foreground(Brushes.White));
+            .Child(new TextBlock().Text(text).FontSize(11.5).FontWeight(FontWeight.SemiBold).Foreground(Brushes.White));
 
     /// <summary>
     /// Small CI badge. The glyph carries the meaning (✓ passing, ✗ failing, … running, – none) so it reads
@@ -133,8 +145,8 @@ internal static class ViewHelpers
             CheckState.Pending => ("… CI", PendingBrush, "Checks running"),
             _ => ("– CI", NeutralBrush, "No checks"),
         };
-        var badge = new TextBlock().Text(glyph).FontSize(10.5).FontWeight(FontWeight.SemiBold).Foreground(brush)
-            .VerticalAlignment(VerticalAlignment.Center).MinWidth(30)
+        var badge = new TextBlock().Text(glyph).FontSize(12).FontWeight(FontWeight.SemiBold).Foreground(brush)
+            .VerticalAlignment(VerticalAlignment.Center)
             .Opacity(checks is null ? 0.5 : 1);
         ToolTip.SetTip(badge, tip);
         return badge;
@@ -144,16 +156,17 @@ internal static class ViewHelpers
     /// A whole-row clickable card. Button.Click bubbles, so a nested control's click (e.g. Dismiss) also arrives
     /// here; only react when the row itself was the source.
     /// </summary>
-    public static Button Row(Control content, Action open)
+    public static Button Row(Control content, Action open, IBrush? background = null, IBrush? stripe = null)
     {
         var row = new Button()
             .HorizontalAlignment(HorizontalAlignment.Stretch)
             .HorizontalContentAlignment(HorizontalAlignment.Stretch)
-            .Background(CardBrush)
-            .BorderThickness(0)
-            .CornerRadius(6)
-            .Padding(8, 5)
-            .Margin(0, 0, 0, 3)
+            .Background(background ?? CardBrush)
+            .BorderThickness(stripe is null ? new Thickness(0) : new Thickness(3, 0, 0, 0))
+            .BorderBrush(stripe ?? Brushes.Transparent)
+            .CornerRadius(8)
+            .Padding(10, 6)
+            .Margin(0, 0, 0, 4)
             .Cursor(HandCursor)
             .Content(content);
         row.Click += (_, e) => { if (ReferenceEquals(e.Source, row)) { open(); } };
@@ -175,18 +188,18 @@ internal static class ViewHelpers
             return Meta(item.Age);
         }
 
-        var label = new TextBlock().Text($"⏳ {item.Age}").FontSize(11).FontWeight(FontWeight.Bold).Foreground(NeedsYouBrush)
+        var label = new TextBlock().Text($"⏳ {item.Age}").FontSize(12).FontWeight(FontWeight.Bold).Foreground(NeedsYouBrush)
             .VerticalAlignment(VerticalAlignment.Center);
         ToolTip.SetTip(label, "Open for more than a day");
         return label;
     }
 
     public static TextBlock Meta(string text) =>
-        new TextBlock().Text(text).FontSize(11).Opacity(0.7).VerticalAlignment(VerticalAlignment.Center)
+        new TextBlock().Text(text).FontSize(12).Opacity(0.75).VerticalAlignment(VerticalAlignment.Center)
             .TextTrimming(TextTrimming.CharacterEllipsis);
 
     public static TextBlock RowTitle(string text) =>
-        new TextBlock().Text(text).FontSize(13).FontWeight(FontWeight.Medium).VerticalAlignment(VerticalAlignment.Center)
+        new TextBlock().Text(text).FontSize(14).FontWeight(FontWeight.SemiBold).VerticalAlignment(VerticalAlignment.Center)
             .TextTrimming(TextTrimming.CharacterEllipsis);
 
     public static Button SmallButton(string text, Action onClick) =>

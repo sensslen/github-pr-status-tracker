@@ -22,8 +22,111 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
     public bool IsOverdue { get; } = DateTimeOffset.Now - tracked.Pr.CreatedAt > TimeSpan.FromHours(24);
     public CheckState? Checks { get; } = tracked.Pr.Checks;
 
-    /// <summary>One dense line: repo, author, size, review tallies, labels, last activity.</summary>
-    public string Details { get; } = BuildDetails(tracked.Pr);
+    public string Number { get; } = $"#{tracked.Pr.Number}";
+    public string Author { get; } = tracked.Pr.Author;
+    public string Size { get; } = $"+{tracked.Pr.Additions} −{tracked.Pr.Deletions}";
+    public string Updated { get; } = $"updated {FormatAge(tracked.Pr.UpdatedAt)} ago";
+    public IReadOnlyList<string> Labels { get; } = tracked.Pr.Labels;
+
+    /// <summary>The branch the PR merges into. Empty for a snapshot written before branches were fetched.</summary>
+    public string TargetBranch { get; } = tracked.Pr.BaseBranch;
+    public string SourceBranch { get; } = tracked.Pr.HeadBranch;
+    public bool HasTargetBranch => TargetBranch.Length > 0;
+
+    /// <summary>Merging into a release branch or another PR's branch, which the row calls out.</summary>
+    public bool TargetsNonDefaultBranch { get; } = tracked.Pr.TargetsNonDefaultBranch;
+
+    public string BranchTip => (SourceBranch, TargetsNonDefaultBranch) switch
+    {
+        ("", _) => $"Merges into {TargetBranch}",
+        (_, true) => $"Merges {SourceBranch} into {TargetBranch}, not the default branch {tracked.Pr.DefaultBranch}",
+        _ => $"Merges {SourceBranch} into {TargetBranch}",
+    };
+
+    private readonly IReadOnlyList<Review> _humanVerdicts = [.. tracked.Pr.Verdicts().Where(r => !IsCodeRabbit(r.Author))];
+    private readonly IReadOnlyList<string> _humansAwaited = [.. tracked.Pr.RequestedReviewers.Where(r => !IsCodeRabbit(r))];
+
+    /// <summary>
+    /// Human review tallies: approvals, who requested changes, reviewers still asked. Empty when there are none.
+    /// Change requests are named because they are the ones you have to go and answer.
+    /// CodeRabbit is left out and reported by <see cref="Rabbit"/>, so a bot approval never reads as a person's.
+    /// </summary>
+    public string Reviews => BuildReviews(_humanVerdicts, _humansAwaited);
+
+    /// <summary>
+    /// Where the people reviewing stand, as one symbol: any standing change request outweighs approvals, and an
+    /// approval only counts as done once GitHub no longer asks for more reviews.
+    /// </summary>
+    public ReviewVerdict Human => _humanVerdicts.Any(r => r.State == ReviewState.ChangesRequested) ? ReviewVerdict.ChangesRequested
+        : HumanApprovals > 0 && tracked.Pr.ReviewDecision != ReviewDecision.ReviewRequired ? ReviewVerdict.Approved
+        : HumanApprovals > 0 || _humansAwaited.Count > 0 ? ReviewVerdict.Pending
+        : tracked.Pr.LatestReviews.Any(r => !IsCodeRabbit(r.Author)) ? ReviewVerdict.Commented
+        : ReviewVerdict.None;
+
+    /// <summary>Who said what, one person per line, for the review chip's tooltip.</summary>
+    public string HumanTip
+    {
+        get
+        {
+            var lines = _humanVerdicts
+                .Select(r => r.State == ReviewState.Approved ? $"{r.Author} approved" : $"{r.Author} requested changes")
+                .ToList();
+            var asked = _humansAwaited.Where(a => !_humanVerdicts.Any(r => r.Author == a)).ToList();
+            var reasked = _humansAwaited.Where(a => _humanVerdicts.Any(r => r.Author == a)).ToList();
+            if (reasked.Count > 0)
+            {
+                lines.Add($"Asked again: {string.Join(", ", reasked)}");
+            }
+
+            if (asked.Count > 0)
+            {
+                lines.Add($"Waiting on: {string.Join(", ", asked)}");
+            }
+
+            return lines.Count > 0 ? string.Join("\n", lines) : "No reviewers yet";
+        }
+    }
+
+    /// <summary>Where CodeRabbit stands on this PR. <see cref="ReviewVerdict.None"/> when it has not been asked
+    /// and has not reviewed.</summary>
+    public ReviewVerdict Rabbit { get; } = RabbitVerdictOf(tracked.Pr);
+
+    public bool HasRabbit => Rabbit != ReviewVerdict.None;
+
+    /// <summary>Approvals from people, leaving CodeRabbit out.</summary>
+    public int HumanApprovals => _humanVerdicts.Count(r => r.State == ReviewState.Approved);
+
+    /// <summary>
+    /// A change request, from a person or CodeRabbit, that is still yours to act on: its reviewer has not been
+    /// asked to look again. Once you re-request the review the ball is in their court, even though GitHub keeps
+    /// the request blocking until they answer.
+    /// </summary>
+    public bool HasActionableChangeRequest { get; } = tracked.Pr.Verdicts().Any(r => r.State == ReviewState.ChangesRequested
+        && !tracked.Pr.RequestedReviewers.Contains(r.Author, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The card's tint. Attention wins over good: a PR with threads awaiting a reply or a change request not yet
+    /// answered with a re-request needs looking at before anything else. Good means safe to merge without a second thought: ready, approved by a
+    /// person rather than only CodeRabbit, and merging into the default branch. A ready PR that misses either of
+    /// the last two stays untinted, as one to merge with care.
+    /// </summary>
+    public RowTone Tone => HasOpenThreads || HasActionableChangeRequest ? RowTone.Attention
+        : Status == PrStatus.ReadyToMerge && HumanApprovals > 0 && HasTargetBranch && !TargetsNonDefaultBranch ? RowTone.Good
+        : RowTone.Neutral;
+
+    public string RabbitTip => Rabbit switch
+    {
+        ReviewVerdict.Approved => "CodeRabbit approved",
+        ReviewVerdict.ChangesRequested => "CodeRabbit requested changes",
+        ReviewVerdict.Commented => "CodeRabbit commented",
+        ReviewVerdict.Pending => "CodeRabbit has been asked and not reviewed yet",
+        _ => string.Empty,
+    };
+
+    /// <summary>The CodeRabbit app reviews as `coderabbitai`; the REST API adds `[bot]`, GraphQL does not.</summary>
+    internal static bool IsCodeRabbit(string login) => login.StartsWith("coderabbit", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasConflicts { get; } = tracked.Pr.Mergeable == Mergeable.Conflicting;
 
     public bool IsStarred { get; } = isStarred;
 
@@ -33,7 +136,7 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
     /// Everything this PR is calling for, most pressing first. Empty for a PR that needs nothing from you,
     /// and for every PR that is not yours — those are what the other two tabs are for.
     /// </summary>
-    public IReadOnlyList<PrCallout> Callouts { get; } = tracked.Status.Callouts(tracked.Pr.HasOpenThreads);
+    public IReadOnlyList<PrCallout> Callouts { get; } = tracked.Status.Callouts(tracked.Pr.HasOpenThreads, tracked.Pr.HasUnresolvedThreads);
 
     /// <summary>The one the row sorts and colours by. None is the enum's default, so an empty list gives it.</summary>
     public PrCallout Callout => Callouts.FirstOrDefault();
@@ -42,46 +145,46 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 
     public bool NeedsAttention => Callouts.Count > 0;
 
-    public string OpenThreadsTip => HasOpenThreads
-        ? "Unresolved review threads awaiting your reply"
-        : string.Empty;
+    public string OpenThreadsTip => !HasOpenThreads ? string.Empty
+        : tracked.Pr.HasOpenThreads ? "Unresolved review threads awaiting your reply"
+        : "Approved, but unresolved review threads block the merge";
 
-    private static string BuildDetails(PullRequest pr)
+    private static ReviewVerdict RabbitVerdictOf(PullRequest pr)
     {
-        var approvals = pr.LatestReviews.Count(r => r.State == ReviewState.Approved);
-        var changes = pr.LatestReviews.Count(r => r.State == ReviewState.ChangesRequested);
-
-        var parts = new List<string> { $"{pr.Repo}#{pr.Number}", pr.Author, $"+{pr.Additions} −{pr.Deletions}" };
-        if (approvals > 0)
+        var review = pr.LatestReviews.Where(r => IsCodeRabbit(r.Author)).MaxBy(r => r.SubmittedAt);
+        return review?.State switch
         {
-            parts.Add($"✓ {approvals}");
-        }
-
-        if (changes > 0)
-        {
-            parts.Add($"✗ {changes}");
-        }
-
-        if (pr.RequestedReviewers.Count > 0)
-        {
-            parts.Add($"{pr.RequestedReviewers.Count} awaiting");
-        }
-
-        if (IsConflicted(pr))
-        {
-            parts.Add("conflicts");
-        }
-
-        if (pr.Labels.Count > 0)
-        {
-            parts.Add("🏷 " + string.Join(", ", pr.Labels));
-        }
-
-        parts.Add($"updated {FormatAge(pr.UpdatedAt)} ago");
-        return string.Join(" · ", parts);
+            ReviewState.Approved => ReviewVerdict.Approved,
+            ReviewState.ChangesRequested => ReviewVerdict.ChangesRequested,
+            ReviewState.Commented or ReviewState.Dismissed => ReviewVerdict.Commented,
+            _ => pr.RequestedReviewers.Any(IsCodeRabbit) ? ReviewVerdict.Pending : ReviewVerdict.None,
+        };
     }
 
-    private static bool IsConflicted(PullRequest pr) => pr.Mergeable == Mergeable.Conflicting;
+    private static string BuildReviews(IReadOnlyList<Review> verdicts, IReadOnlyList<string> awaited)
+    {
+        var approvals = verdicts.Count(r => r.State == ReviewState.Approved);
+        var changes = verdicts.Where(r => r.State == ReviewState.ChangesRequested).Select(r => r.Author).ToList();
+        var awaiting = awaited.Count;
+
+        var parts = new List<string>();
+        if (approvals > 0)
+        {
+            parts.Add($"{approvals} approved");
+        }
+
+        if (changes.Count > 0)
+        {
+            parts.Add($"changes requested by {string.Join(", ", changes)}");
+        }
+
+        if (awaiting > 0)
+        {
+            parts.Add($"{awaiting} awaiting");
+        }
+
+        return string.Join(", ", parts);
+    }
 
     internal static string FormatAge(DateTimeOffset when)
     {
@@ -91,6 +194,12 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
             : $"{(int)span.TotalDays}d";
     }
 }
+
+/// <summary>How a PR card is tinted; see <see cref="PrItemViewModel.Tone"/>.</summary>
+public enum RowTone { Neutral, Good, Attention }
+
+/// <summary>Where a set of reviewers stands on a PR: the people together, or CodeRabbit on its own.</summary>
+public enum ReviewVerdict { None, Pending, Commented, ChangesRequested, Approved }
 
 public sealed partial class PrRepositoryViewModel(string name) : ObservableObject
 {
@@ -104,6 +213,20 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
 {
     private const string HideTeamOnlyText = "Hide team-only requests";
     private readonly Dictionary<string, PrRepositoryViewModel> _repositories = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Collapsed sections by repository name, including repositories with no rows on this tab right now, so a
+    /// section collapsed yesterday is still collapsed when its next PR arrives.
+    /// </summary>
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+
+    /// <summary>Raised when the user collapses or expands a section, for the owner to persist <see cref="Collapsed"/>.</summary>
+    public event Action? CollapseChanged;
+
+    public IReadOnlyCollection<string> Collapsed => _collapsed;
+
+    /// <summary>Seeds the collapsed sections from a previous run. Call before the first <see cref="Replace"/>.</summary>
+    public void RestoreCollapsed(IEnumerable<string> names) => _collapsed.UnionWith(names);
 
     /// <summary>
     /// Stands in for the bucket's own wording once a tab is narrowed. "Nothing needs you right now" is a claim
@@ -195,7 +318,14 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         {
             if (!_repositories.TryGetValue(rows.Key, out var repository))
             {
-                repository = new PrRepositoryViewModel(rows.Key);
+                repository = new PrRepositoryViewModel(rows.Key) { IsExpanded = !_collapsed.Contains(rows.Key) };
+                repository.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(PrRepositoryViewModel.IsExpanded) && Remember(repository))
+                    {
+                        CollapseChanged?.Invoke();
+                    }
+                };
                 _repositories.Add(rows.Key, repository);
             }
 
@@ -218,6 +348,9 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         // Rows on the review tabs never carry a callout, so there is nothing there to add up.
         Attention = Bucket == PrBucket.YourPrs ? Summarise(items) : string.Empty;
     }
+
+    private bool Remember(PrRepositoryViewModel repository) =>
+        repository.IsExpanded ? _collapsed.Remove(repository.Name) : _collapsed.Add(repository.Name);
 
     /// <summary>A failing PR with open threads must be counted under both callouts.</summary>
     internal static string Summarise(IEnumerable<PrItemViewModel> items) =>
@@ -273,6 +406,16 @@ public sealed partial class MainViewModel : ObservableObject
         ReviewFilter.Changed += RefreshGroups;
         YourPrsFilter.Changed += RefreshGroups;
         NeedsYou.HideTeamOnly = settings.HideTeamOnlyRequests;
+        foreach (var group in _groups)
+        {
+            var key = group.Bucket.ToString();
+            group.RestoreCollapsed(settings.CollapsedRepositories.GetValueOrDefault(key) ?? []);
+            group.CollapseChanged += () =>
+            {
+                _settings.CollapsedRepositories[key] = [.. group.Collapsed.Order(StringComparer.Ordinal)];
+                _settingsFile.Save(_settings);
+            };
+        }
         store.Updated += () => Dispatcher.UIThread.Post(RefreshGroups);
         stars.Changed += () => Dispatcher.UIThread.Post(RefreshGroups);
         poller.StateChanged += () => Dispatcher.UIThread.Post(RefreshPollerState);

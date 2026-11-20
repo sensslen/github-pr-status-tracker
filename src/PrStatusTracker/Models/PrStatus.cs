@@ -99,10 +99,14 @@ public static class PrStatusExtensions
 
     /// <summary>
     /// The status callout leads so an open thread cannot hide failing CI or a merge conflict.
+    /// <paramref name="hasUnresolvedThreads"/> covers threads still waiting on a reviewer too. Those stay quiet,
+    /// except on a PR that is otherwise ready: a branch that requires conversation resolution will not merge it,
+    /// so it is an open-threads PR, not a ready one.
     /// </summary>
-    public static IReadOnlyList<PrCallout> Callouts(this PrStatus status, bool hasOpenThreads) =>
+    public static IReadOnlyList<PrCallout> Callouts(this PrStatus status, bool hasOpenThreads, bool hasUnresolvedThreads = false) =>
         (status.Callout(), hasOpenThreads) switch
         {
+            (PrCallout.ReadyToMerge, _) when hasOpenThreads || hasUnresolvedThreads => [PrCallout.OpenThreads],
             // Built once per row on every rebuild of a list that does not virtualise, and most rows want
             // nothing, so the quiet case has to cost no allocation: `[]` lowers to Array.Empty.
             (PrCallout.None, false) => [],

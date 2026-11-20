@@ -46,9 +46,9 @@ The app checks for a newer release once a day and offers it in the window header
 opens the new disk image for the drag to Applications.
 
 > **Moving from the renewedvision repository:** releases up to v0.0.3 came from
-> `renewedvision/github-pr-status-tracker`, which is now archived and read-only. Those builds keep
-> looking there and never see a newer release, so install v0.1.0 or later by hand once. From
-> then on, updates come from this repository. Your settings, stars and notification history stay.
+> `renewedvision/github-pr-status-tracker`, which is now archived and read-only. Those builds
+> cannot update themselves, so install v0.1.0 or later by hand once. From then on, updates come
+> from this repository. Your settings, stars and notification history stay.
 
 ## The tabs
 

@@ -34,9 +34,19 @@ public class PrItemCalloutTests
         var item = Item(PrStatus.AwaitingReview, openThreads: true);
         Assert.Equal([PrCallout.OpenThreads], item.Callouts);
         Assert.True(item.NeedsAttention);
-        Assert.Equal("Open threads", item.StatusLabel);
+        Assert.Equal("In discussion", item.StatusLabel);
         Assert.Equal("Unresolved review threads awaiting your reply", item.OpenThreadsTip);
         Assert.Equal("1 with open threads", PrGroupViewModel.Summarise([item]));
+    }
+
+    [Fact]
+    public void A_draft_keeps_its_pill_and_shows_threads_as_the_marker()
+    {
+        var item = Item(PrStatus.Draft, openThreads: true);
+        Assert.Equal([PrCallout.OpenThreads], item.Callouts);
+        Assert.True(item.HasOpenThreads);
+        Assert.False(item.PillShowsThreads);
+        Assert.Equal("Draft", item.StatusLabel);
     }
 
     [Theory]
@@ -62,7 +72,7 @@ public class PrItemCalloutTests
     {
         var item = Item(PrStatus.ReadyToMerge, openThreads: openThreads, unresolvedThreads: unresolvedThreads || openThreads);
         Assert.Equal([PrCallout.OpenThreads], item.Callouts);
-        Assert.Equal("Open threads", item.StatusLabel);
+        Assert.Equal("In discussion", item.StatusLabel);
         Assert.Equal(tip, item.OpenThreadsTip);
         Assert.Equal(RowTone.Attention, item.Tone);
     }

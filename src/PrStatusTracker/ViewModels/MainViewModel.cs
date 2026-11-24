@@ -141,7 +141,13 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
     /// <summary>The one the row sorts and colours by. None is the enum's default, so an empty list gives it.</summary>
     public PrCallout Callout => Callouts.FirstOrDefault();
 
-    public string StatusLabel => Callout == PrCallout.OpenThreads ? "Open threads" : Status.Label();
+    /// <summary>
+    /// Whether the pill speaks for the threads. Only when they are all the PR is calling for and it is not a
+    /// draft: a draft keeps its Draft pill and shows the threads as the 💬 marker, like every other status.
+    /// </summary>
+    public bool PillShowsThreads => Callout == PrCallout.OpenThreads && !Status.IsDraft();
+
+    public string StatusLabel => PillShowsThreads ? "In discussion" : Status.Label();
 
     public bool NeedsAttention => Callouts.Count > 0;
 

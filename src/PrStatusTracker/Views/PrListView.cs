@@ -118,10 +118,10 @@ internal static class PrListView
                     new StackPanel().Grid_Column(1).Spacing(3).Children(
                         new DockPanel().Children(
                             Pill(item.StatusLabel, PillBrush(item))
-                                .ToolTip_Tip(item.Callout == PrCallout.OpenThreads ? item.OpenThreadsTip : null)
+                                .ToolTip_Tip(item.PillShowsThreads ? item.OpenThreadsTip : null)
                                 .DockPanel_Dock(Dock.Left).Margin(0, 0, 8, 0),
                             // Only when the pill is saying something else; otherwise it would repeat it.
-                            CommentMarker(item, item.HasOpenThreads && item.Callout != PrCallout.OpenThreads)
+                            CommentMarker(item, item.HasOpenThreads && !item.PillShowsThreads)
                                 .DockPanel_Dock(Dock.Left).Margin(0, 0, 8, 0),
                             RowTitle(item.Title)),
                         FactsLine(item)),

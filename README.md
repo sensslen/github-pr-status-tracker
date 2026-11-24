@@ -96,7 +96,7 @@ Card colour says what the PR wants from you:
 |---|---|
 | Ready to merge | Approved, checks green, nothing outstanding |
 | Approved, checks pending | Approved, CI still running |
-| Open threads | A review thread waits on your reply, or the PR is otherwise ready and an unresolved thread blocks the merge |
+| In discussion | A review thread waits on your reply, or the PR is otherwise ready and an unresolved thread blocks the merge |
 | Checks failing | CI is red |
 | Merge conflict | The branch no longer merges cleanly |
 | Changes requested | A reviewer asked for changes |
@@ -106,7 +106,7 @@ Card colour says what the PR wants from you:
 
 A thread waits on your reply while it is unresolved and its last comment is from someone else,
 bots included. An approved, green PR with any unresolved thread, even one waiting on the
-reviewer, shows *Open threads* instead of *Ready to merge*, because a branch that requires
+reviewer, shows *In discussion* instead of *Ready to merge*, because a branch that requires
 conversation resolution will not merge it. Every poll reads the current thread state from GitHub.
 
 [ARCHITECTURE.md](ARCHITECTURE.md#4-status-model) has the full rules, including the reviewer side.

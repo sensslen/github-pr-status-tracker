@@ -1,4 +1,4 @@
-# Architecture & Plan
+﻿# Architecture & Plan
 
 **GitHub PR Status Tracker** — a tray app that shows which pull requests are waiting on you.
 
@@ -476,9 +476,10 @@ Tabs:
    on the two review tabs.
 
    The **💬 marker** flags unresolved review threads awaiting your reply. A quiet status
-   becomes *Open threads* on the pill; otherwise the status leads and the marker appears
-   beside it. Both use the same orange as other work awaiting you and the tooltip
-   *Unresolved review threads awaiting your reply*.
+   becomes *In discussion* on a neutral grey pill; the card's orange tint already flags it.
+   A draft keeps its *Draft* pill, and every status that wants something keeps its own;
+   those show the marker beside the pill, in the same orange as other work awaiting you.
+   Both carry the tooltip *Unresolved review threads awaiting your reply*.
    Opening the PR never changes this state. Work is visible on the first poll and remains
    visible after restarting. Resolving or answering the last actionable thread clears it;
    reopening a thread whose last reply is from someone else brings it back within a few polls.

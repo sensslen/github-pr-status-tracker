@@ -86,11 +86,12 @@ internal static class ViewHelpers
         _ => NeutralBrush,
     };
 
-    public static IBrush PillBrush(PrItemViewModel item) => item.Callout switch
+    /// <summary>An In discussion pill stays grey: the card's tint already flags the threads.</summary>
+    public static IBrush PillBrush(PrItemViewModel item) => item.PillShowsThreads ? NeutralBrush : item.Callout switch
     {
         PrCallout.ReadyToMerge => ReadyBrush,
         PrCallout.ChecksFailing or PrCallout.MergeConflict => FailBrush,
-        PrCallout.ChangesRequested or PrCallout.NoReviewers or PrCallout.OpenThreads => NeedsYouBrush,
+        PrCallout.ChangesRequested or PrCallout.NoReviewers => NeedsYouBrush,
         _ => BucketBrush(item.Status.Bucket()),
     };
 

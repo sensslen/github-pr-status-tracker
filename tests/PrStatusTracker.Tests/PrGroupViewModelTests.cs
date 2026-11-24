@@ -41,7 +41,7 @@ public class PrGroupViewModelTests
     }
 
     [Fact]
-    public void Stars_outrank_callouts_and_quiet_states_stay_separate_inside_each_star_partition()
+    public void Drafts_sink_below_everything_then_stars_lead_each_half()
     {
         var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
         group.Replace([
@@ -54,8 +54,23 @@ public class PrGroupViewModelTests
             Item(Me, 3, status: PrStatus.ReadyToMerge),
         ]);
 
-        Assert.Equal([2, 1, 3, 4, 5, 6, 7], group.Repositories.SelectMany(r => r.Items).Select(i => i.Pr.Number));
+        Assert.Equal([2, 3, 4, 6, 1, 5, 7], group.Repositories.SelectMany(r => r.Items).Select(i => i.Pr.Number));
         Assert.Equal("1 ready to merge · 1 CI failing · 1 with open threads", group.Attention);
+    }
+
+    /// <summary>Threads behind a Draft or In discussion pill do not show in its text, so they do not move it.</summary>
+    [Fact]
+    public void Rows_with_the_same_pill_sort_by_age_alone()
+    {
+        var group = new PrGroupViewModel(PrBucket.YourPrs, new PrFilterViewModel());
+        group.Replace([
+            Item(Me, 4, status: PrStatus.Draft, openThreads: true, createdAt: T0),
+            Item(Me, 3, status: PrStatus.Draft, createdAt: T0.AddDays(-1)),
+            Item(Me, 2, status: PrStatus.AwaitingReview, openThreads: true, createdAt: T0),
+            Item(Me, 1, status: PrStatus.ApprovedChecksPending, openThreads: true, createdAt: T0.AddDays(-1)),
+        ]);
+
+        Assert.Equal([1, 2, 3, 4], group.Repositories.SelectMany(r => r.Items).Select(i => i.Pr.Number));
     }
 
     [Theory]

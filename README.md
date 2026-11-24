@@ -132,8 +132,8 @@ The filter bar matches title, repository, author, label, target branch and `#num
 dropdowns for author, label and repository. *Needs you* and *Waiting on others* share one filter;
 *Your PRs* has its own. Filters never change the tray summary.
 
-Click ☆ to star a PR. Starred PRs sort to the top of their repository and stay starred across
-restarts. Stars are local; nothing is sent to GitHub.
+Click ☆ to star a PR. Starred PRs sort to the top of their repository, drafts still last, and
+stay starred across restarts. Stars are local; nothing is sent to GitHub.
 
 ## Building from source
 

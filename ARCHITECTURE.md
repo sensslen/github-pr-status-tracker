@@ -443,11 +443,12 @@ Tabs:
 1. **Needs you / Waiting on others / Your PRs** — tab headers carry the count.
    Every PR tab has **repository headers**, ordered alphabetically using ordinal case-insensitive
    comparison, with ordinal spelling as a tie-breaker. `PrGroupViewModel.Replace` filters before
-   building sections, so hidden repositories leave no empty headers. Within a repository, starred
-   rows come first, then rows carrying a callout in callout priority order. Each partition sorts
-   non-drafts before drafts, then by status, oldest `createdAt`, and PR number. Ordinary awaiting
-   review rows therefore stay together ahead of ordinary drafts within each star partition.
-   Stars pin above all statuses in their repository, not above other repository sections.
+   building sections, so hidden repositories leave no empty headers. Within a repository drafts sink
+   below every other row, whatever callout or star they carry. Each half then sorts starred rows
+   first, then by status pill (`PrItemViewModel.PillOrder`: pills with a callout in callout
+   priority order, then quiet pills by status), then oldest `createdAt`, and PR number. Rows whose
+   pills read the same tie on the pill, so open threads behind a *Draft* pill do not move it. Stars pin within their half of their repository, never above
+   another repository section or a draft above a non-draft.
    Each section uses a native `Expander`, expanded by default. Its per-tab repository view model
    keeps expansion state across polls and filtering. Collapsed repository names are saved per tab in
    `settings.json` (`CollapsedRepositories`) on every toggle and restored at startup, including names

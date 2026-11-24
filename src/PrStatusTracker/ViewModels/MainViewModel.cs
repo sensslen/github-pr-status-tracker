@@ -149,6 +149,14 @@ public sealed class PrItemViewModel(TrackedPr tracked, bool isStarred)
 
     public string StatusLabel => PillShowsThreads ? "In discussion" : Status.Label();
 
+    /// <summary>
+    /// Where the pill sorts: pills that call for something first, in callout priority, then quiet ones by status.
+    /// Rows whose pills read the same tie here, whatever sits behind them, so age decides between them.
+    /// </summary>
+    public (bool Quiet, PrCallout Callout, int Status) PillOrder => PillShowsThreads
+        ? (false, PrCallout.OpenThreads, -1)
+        : (Status.Callout() == PrCallout.None, Status.Callout(), (int)Status);
+
     public bool NeedsAttention => Callouts.Count > 0;
 
     public string OpenThreadsTip => !HasOpenThreads ? string.Empty
@@ -298,15 +306,14 @@ public sealed partial class PrGroupViewModel(PrBucket bucket, PrFilterViewModel 
         TotalCount = all.Count;
         var items = new List<PrItemViewModel>();
         // Sifted by the bar first, so the count below is what unchecking the box would bring back rather than
-        // rows the bar was excluding anyway.
+        // rows the bar was excluding anyway. Within a repository drafts sink below everything else whatever they
+        // carry; each half then goes stars, status pill, age.
         foreach (var item in all.Where(i => filter.Matches(i.Pr))
             .OrderBy(i => i.Pr.Repo, StringComparer.OrdinalIgnoreCase)
             .ThenBy(i => i.Pr.Repo, StringComparer.Ordinal)
-            .ThenByDescending(i => i.IsStarred)
-            .ThenByDescending(i => i.NeedsAttention)
-            .ThenBy(i => i.Callout)
             .ThenBy(i => i.Status.IsDraft())
-            .ThenBy(i => i.Status)
+            .ThenByDescending(i => i.IsStarred)
+            .ThenBy(i => i.PillOrder)
             .ThenBy(i => i.Pr.CreatedAt)
             .ThenBy(i => i.Pr.Number))
         {

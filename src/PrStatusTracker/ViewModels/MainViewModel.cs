@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PrStatusTracker.Core;
@@ -471,10 +472,51 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] public partial bool IsInstallingUpdate { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasBanner))]
+    [NotifyPropertyChangedFor(nameof(HasBanner), nameof(BannerSummary), nameof(ShowBannerToast))]
     public partial string Banner { get; set; } = string.Empty;
 
     public bool HasBanner => Banner.Length > 0;
+
+    /// <summary>One line for the collapsed toast and the tray tooltip. gh can hand back a whole HTML error page.</summary>
+    public string BannerSummary => SummarizeError(Banner);
+
+    /// <summary>The header keeps saying a refresh failed after the toast is dismissed.</summary>
+    [ObservableProperty] public partial bool RefreshFailed { get; set; }
+    [ObservableProperty] public partial string BannerTitle { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowBannerToast))]
+    public partial bool IsBannerDismissed { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BannerDetailsLabel))]
+    public partial bool IsBannerExpanded { get; set; }
+
+    public bool ShowBannerToast => HasBanner && !IsBannerDismissed;
+    public string BannerDetailsLabel => IsBannerExpanded ? "Hide details" : "Details";
+
+    /// <summary>A different message is news, so it comes back collapsed even after the last one was dismissed.</summary>
+    partial void OnBannerChanged(string value)
+    {
+        IsBannerDismissed = false;
+        IsBannerExpanded = false;
+    }
+
+    public void DismissBanner() => IsBannerDismissed = true;
+    public void ShowBanner() => IsBannerDismissed = false;
+    public void ToggleBannerDetails() => IsBannerExpanded = !IsBannerExpanded;
+
+    private const int MaxSummaryLength = 160;
+
+    internal static string SummarizeError(string message)
+    {
+        var title = Regex.Match(message, @"<title[^>]*>\s*(.*?)\s*</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        var line = title.Success
+            ? title.Groups[1].Value
+            : message.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? string.Empty;
+        line = Regex.Replace(line, @"\s+", " ");
+        return line.Length <= MaxSummaryLength ? line : $"{line[..(MaxSummaryLength - 1)]}…";
+    }
 
     // --- settings: the view model is a thin pass-through over AppSettings ------------------------------------
 
@@ -689,6 +731,8 @@ public sealed partial class MainViewModel : ObservableObject
     private void RefreshPollerState()
     {
         IsRefreshing = _poller.IsPolling;
+        RefreshFailed = _poller.LastError is not null;
+        BannerTitle = RefreshFailed ? "Refresh failed" : "Settings change failed";
         Banner = _poller.LastError?.UserMessage ?? _localMessage ?? string.Empty;
         LastChecked = _poller.LastSuccess is { } t ? $"Last checked {t:t}" : string.Empty;
         RefreshTrayState();

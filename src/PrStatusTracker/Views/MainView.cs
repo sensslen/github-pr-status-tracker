@@ -9,14 +9,49 @@ namespace PrStatusTracker.Views;
 public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
 {
     protected override object Build(MainViewModel vm) =>
+        new Panel().Children(Content(vm), ErrorToast(vm));
+
+    /// <summary>
+    /// Errors float over the bottom of the window, collapsed to one line, so a long one (gh can return a whole
+    /// HTML page) never pushes the PR list out of view. Dismissing it leaves the header marker in place.
+    /// </summary>
+    private static Border ErrorToast(MainViewModel vm) =>
+        new Border()
+            .VerticalAlignment(VerticalAlignment.Bottom)
+            .HorizontalAlignment(HorizontalAlignment.Stretch)
+            .MaxWidth(640)
+            .Margin(12)
+            .Padding(12, 8)
+            .CornerRadius(8)
+            .Background(ViewHelpers.ToastBrush)
+            .BorderThickness(3, 0, 0, 0)
+            .BorderBrush(ViewHelpers.FailBrush)
+            .BoxShadow(BoxShadows.Parse("0 4 16 0 #50000000"))
+            .IsVisible(vm, x => x.ShowBannerToast)
+            .Child(new DockPanel().Children(
+                new DockPanel().DockPanel_Dock(Dock.Top).Children(
+                    new Button().DockPanel_Dock(Dock.Right).Content("✕").FontSize(12).Padding(8, 2).Margin(6, 0, 0, 0)
+                        .Background(Brushes.Transparent).Foreground(Brushes.White).Cursor(ViewHelpers.HandCursor)
+                        .VerticalAlignment(VerticalAlignment.Center)
+                        .ToolTip_Tip("Dismiss")
+                        .OnClick(_ => vm.DismissBanner()),
+                    new Button().DockPanel_Dock(Dock.Right).FontSize(11).Padding(8, 2)
+                        .Content(vm, x => x.BannerDetailsLabel)
+                        .VerticalAlignment(VerticalAlignment.Center)
+                        .OnClick(_ => vm.ToggleBannerDetails()),
+                    new StackPanel().Orientation(Orientation.Horizontal).Spacing(8).VerticalAlignment(VerticalAlignment.Center).Children(
+                        new TextBlock().Text(vm, x => x.BannerTitle).FontSize(12).FontWeight(FontWeight.SemiBold)
+                            .Foreground(Brushes.White).VerticalAlignment(VerticalAlignment.Center),
+                        new TextBlock().Text(vm, x => x.BannerSummary).FontSize(12).Foreground(Brushes.White).Opacity(0.85)
+                            .TextTrimming(TextTrimming.CharacterEllipsis).VerticalAlignment(VerticalAlignment.Center))),
+                new ScrollViewer().MaxHeight(220).Margin(0, 8, 0, 0)
+                    .IsVisible(vm, x => x.IsBannerExpanded)
+                    .Content(new SelectableTextBlock().Text(vm, x => x.Banner).FontFamily(ViewHelpers.MonoFont).FontSize(11)
+                        .Foreground(Brushes.White).TextWrapping(TextWrapping.Wrap))));
+
+    private static DockPanel Content(MainViewModel vm) =>
         new DockPanel()
             .Children(
-                new Border()
-                    .DockPanel_Dock(Dock.Top)
-                    .Background(Brushes.DarkOrange)
-                    .Padding(12, 6)
-                    .IsVisible(vm, x => x.HasBanner)
-                    .Child(new TextBlock().Foreground(Brushes.White).TextWrapping(TextWrapping.Wrap).FontSize(12).Text(vm, x => x.Banner)),
                 new Border()
                     .DockPanel_Dock(Dock.Top)
                     .Padding(12, 6)
@@ -31,7 +66,15 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
                             .OnClick(e => { _ = vm.InstallUpdateAsync(); }),
                         new StackPanel().Orientation(Orientation.Horizontal).Spacing(10).VerticalAlignment(VerticalAlignment.Center).Children(
                             new TextBlock().FontSize(14).FontWeight(FontWeight.SemiBold).VerticalAlignment(VerticalAlignment.Center).Text(vm, x => x.Summary),
-                            new TextBlock().FontSize(11).Opacity(0.6).VerticalAlignment(VerticalAlignment.Center).Text(vm, x => x.LastChecked)))),
+                            new TextBlock().FontSize(11).Opacity(0.6).VerticalAlignment(VerticalAlignment.Center).Text(vm, x => x.LastChecked),
+                            // The toast can be dismissed; this stays until a refresh succeeds and brings the toast back.
+                            new Button().Content(new TextBlock().Text("⚠ Refresh failed").FontSize(11).FontWeight(FontWeight.SemiBold)
+                                    .Foreground(ViewHelpers.FailBrush))
+                                .Background(Brushes.Transparent).BorderThickness(0).Padding(0).Cursor(ViewHelpers.HandCursor)
+                                .VerticalAlignment(VerticalAlignment.Center)
+                                .IsVisible(vm, x => x.RefreshFailed)
+                                .ToolTip_Tip("Show the error")
+                                .OnClick(_ => vm.ShowBanner())))),
                 new TabControl
                 {
                     Padding = new Thickness(0),
@@ -70,6 +113,7 @@ internal static class ViewHelpers
     public static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#14808080"));
     public static readonly IBrush GoodCardBrush = new ImmutableSolidColorBrush(Color.Parse("#242DA44E"));
     public static readonly IBrush AttentionCardBrush = new ImmutableSolidColorBrush(Color.Parse("#26DB6D28"));
+    public static readonly IBrush ToastBrush = new ImmutableSolidColorBrush(Color.Parse("#F02B2F36"));
     public static readonly IBrush ChipBrush = new ImmutableSolidColorBrush(Color.Parse("#1F808080"));
     public static readonly IBrush WarnChipBrush = new ImmutableSolidColorBrush(Color.Parse("#26DB6D28"));
     public static readonly FontFamily MonoFont = new("Cascadia Mono, Consolas, Menlo, monospace");

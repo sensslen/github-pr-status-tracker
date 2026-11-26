@@ -43,7 +43,7 @@ public sealed class TrayIconHost : IDisposable
 
     private void Refresh()
     {
-        var tooltip = $"PR Status Tracker — {(_vm.HasBanner ? _vm.Banner : _vm.Summary)}";
+        var tooltip = $"PR Status Tracker — {(_vm.HasBanner ? _vm.BannerSummary : _vm.Summary)}";
         if (_icon.ToolTipText != tooltip)
         {
             _icon.ToolTipText = tooltip;

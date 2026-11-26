@@ -43,4 +43,18 @@ public class UpdateServiceTests
     [InlineData("v0.0.1")]
     public void A_build_from_source_is_offered_nothing(string tag) =>
         Assert.False(UpdateService.IsNewer(tag, new Version(0, 0, 0)));
+
+    [Fact]
+    public void Silent_setup_starts_only_after_the_app_and_its_mutex_are_gone()
+    {
+        var script = UpdateService.HandOverScript(4242, @"C:\Temp\it's\setup.exe", @"C:\Apps\PrStatusTracker.exe");
+
+        var waitForApp = script.IndexOf("Wait-Process -Id 4242", StringComparison.Ordinal);
+        var waitForMutex = script.IndexOf("TryOpenExisting('PrStatusTracker-SingleInstance'", StringComparison.Ordinal);
+        var silentSetup = script.IndexOf(@"-FilePath 'C:\Temp\it''s\setup.exe' -ArgumentList '/S'", StringComparison.Ordinal);
+        var relaunch = script.IndexOf(@"Start-Process -FilePath 'C:\Apps\PrStatusTracker.exe'", StringComparison.Ordinal);
+        var setupWithUi = script.IndexOf(@"else { Start-Process -FilePath 'C:\Temp\it''s\setup.exe' }", StringComparison.Ordinal);
+        Assert.True(waitForApp >= 0 && waitForApp < waitForMutex && waitForMutex < silentSetup
+            && silentSetup < relaunch && relaunch < setupWithUi, script);
+    }
 }

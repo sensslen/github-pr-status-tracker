@@ -536,9 +536,10 @@ The release assets are private, so the download runs as `gh release download` to
 credentials, the same ones every query uses, and no token inside the application.
 
 - **Windows** — the setup for this platform is downloaded and run with `/S`. Setup holds the
-  application's single-instance mutex while it copies and aborts a silent run rather than
-  overwrite a running executable, so it has to start after the application is gone: a detached
-  PowerShell waits for the process id, installs, and launches what replaced it.
+  application's single-instance mutex while it copies, and a silent run that finds the mutex taken
+  exits with code 2 and installs nothing. So a detached PowerShell waits for the process id and
+  for the mutex to be free, installs, and launches what replaced it. If the silent run still
+  fails, it starts setup again with its UI, which says why and offers a retry.
 - **macOS** — the disk image is downloaded and opened. Replacing an ad-hoc signed bundle in a
   directory the process may not own is the user's drag to make.
 

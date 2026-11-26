@@ -6,7 +6,7 @@ public static class Program
     public static int Main(string[] args)
     {
         // Single instance: a second launch just exits. The first instance is already in the tray.
-        using var mutex = new Mutex(initiallyOwned: true, "PrStatusTracker-SingleInstance", out var isFirstInstance);
+        using var mutex = new Mutex(initiallyOwned: true, Core.UpdateService.SingleInstanceMutex, out var isFirstInstance);
         if (!isFirstInstance)
         {
             return 0;

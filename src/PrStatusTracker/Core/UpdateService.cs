@@ -61,7 +61,7 @@ public sealed class UpdateService(GhCommandRunner gh, Action shutdown)
     }
 
     /// <summary>
-    /// Download this platform's installer and hand over to it: Windows installs silently and relaunches, macOS
+    /// Download this platform's installer and hand over to it: Windows installs silently once the app has quit and relaunches, macOS
     /// opens the disk image for the drag to Applications.
     /// </summary>
     public async Task InstallAsync(CancellationToken ct = default)
@@ -83,22 +83,33 @@ public sealed class UpdateService(GhCommandRunner gh, Action shutdown)
             return;
         }
 
-        // Setup holds the application's single-instance mutex while it copies, and a silent run has nobody to
-        // ask to quit the app, so it aborts rather than overwrite a running executable. It therefore has to
-        // start once this process is gone: PowerShell waits for the process id, installs, and launches the
-        // build that replaced it.
-        var script =
-            $"Wait-Process -Id {Environment.ProcessId} -Timeout 60 -ErrorAction SilentlyContinue; " +
-            $"if (Get-Process -Id {Environment.ProcessId} -ErrorAction SilentlyContinue) {{ exit 1 }}; " +
-            $"Start-Process -Wait -FilePath {PowerShellLiteral(installer)} -ArgumentList '/S'; " +
-            $"Start-Process -FilePath {PowerShellLiteral(Environment.ProcessPath!)}";
-        Process.Start(new ProcessStartInfo("powershell.exe", ["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
+        Process.Start(new ProcessStartInfo("powershell.exe", ["-NoProfile", "-WindowStyle", "Hidden", "-Command", HandOverScript(Environment.ProcessId, installer, Environment.ProcessPath!)])
         {
             UseShellExecute = false,
             CreateNoWindow = true,
         });
         shutdown();
     }
+
+    /// <summary>
+    /// A silent setup that finds the single-instance mutex taken exits with code 2 and installs nothing, and the
+    /// script used to relaunch the old app over that without a word. So setup starts only once this process is
+    /// gone and the mutex is free. If the silent run still fails, setup runs again with its UI, which says why
+    /// and offers a retry, and its finish page starts the new version.
+    /// </summary>
+    internal static string HandOverScript(int processId, string installer, string app) =>
+        $"Wait-Process -Id {processId} -Timeout 60 -ErrorAction SilentlyContinue; " +
+        "$deadline = (Get-Date).AddSeconds(30); " +
+        "while ((Get-Date) -lt $deadline) { " +
+        "$m = $null; " +
+        $"if (-not [System.Threading.Mutex]::TryOpenExisting({PowerShellLiteral(SingleInstanceMutex)}, [ref]$m)) {{ break }}; " +
+        "$m.Dispose(); Start-Sleep -Milliseconds 250 }; " +
+        $"$setup = Start-Process -Wait -PassThru -FilePath {PowerShellLiteral(installer)} -ArgumentList '/S'; " +
+        $"if ($setup.ExitCode -eq 0) {{ Start-Process -FilePath {PowerShellLiteral(app)} }} " +
+        $"else {{ Start-Process -FilePath {PowerShellLiteral(installer)} }}";
+
+    /// <summary>Shared with Program and the NSIS script, which both take it by this name.</summary>
+    public const string SingleInstanceMutex = "PrStatusTracker-SingleInstance";
 
     /// <summary>Release assets carry the RID: `PrStatusTracker-1.2.3-win-x64-setup.exe`, `PrStatusTracker-1.2.3-osx-arm64.dmg`.</summary>
     private static string AssetPattern =>
